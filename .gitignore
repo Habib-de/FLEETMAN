@@ -1,0 +1,9 @@
+"node_modules/" 
+"target/" 
+"node_modules/" 
+"target/" 
+node_modules/ 
+target/ 
+FRONTEND/node_modules/ 
+*.pack 
+.cache/ 
