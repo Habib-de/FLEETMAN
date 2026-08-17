@@ -5,7 +5,7 @@ import {
   Search, Filter, Download, X,
   BarChart3, Save, CheckCircle,
   Users, Route, Navigation, RefreshCw,
-  Tag, FileText, Clock
+  Tag, FileText, Clock, ArrowLeft 
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -392,6 +392,37 @@ const Geofencing = () => {
       setIsSaving(false);
     }
   };
+
+  // ============================================
+// ✅ NEW: Handle override as manager-approved return
+// ============================================
+const handleOverrideAsReturn = async (violation) => {
+  if (!window.confirm('Mark this as a manager-approved return trip? This will not count as a violation.')) return;
+  
+  setIsSaving(true);
+  setErrorMessage('');
+  setSuccessMessage('');
+  
+  try {
+    const response = await geofenceService.overrideAsReturn(
+      violation.id, 
+      'Manager-approved return trip'
+    );
+    
+    if (response?.success) {
+      setSuccessMessage('✅ Marked as manager-approved return. Driver will not be penalized.');
+      await loadData();
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } else {
+      setErrorMessage('Failed to override violation. Please try again.');
+    }
+  } catch (error) {
+    console.error('Failed to override:', error);
+    setErrorMessage('Failed to override violation. Please try again.');
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   // ============================================
   // ASSIGN VEHICLES FUNCTIONS
@@ -1115,22 +1146,41 @@ const Geofencing = () => {
           <h5 className="font-medium text-sm mb-3">Recent Violations</h5>
           <div className="space-y-2">
             {violations.slice(0, 5).map((violation) => (
-              <div key={violation.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                <div>
-                  <p className="text-sm font-medium">{violation.violationType || 'Violation'}</p>
-                  <p className="text-xs text-gray-500">Vehicle: {violation.vehicleRegistration || violation.vehicleId}</p>
-                  {violation.geofenceName && (
-                    <p className="text-xs text-blue-600">Geofence: {violation.geofenceName}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${violation.resolved ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {violation.resolved ? 'Resolved' : 'Active'}
-                  </span>
-                  <span className="text-xs text-gray-400">{violation.timestamp ? new Date(violation.timestamp).toLocaleDateString() : 'N/A'}</span>
-                </div>
-              </div>
-            ))}
+  <div key={violation.id} className={`flex items-center justify-between p-2 rounded ${violation.overridden ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
+    <div>
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-medium">{violation.violationType || 'Violation'}</p>
+        {violation.overridden && (
+          <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <ArrowLeft size={10} /> Manager Approved Return
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-gray-500">Vehicle: {violation.vehicleRegistration || violation.vehicleId}</p>
+      {violation.geofenceName && (
+        <p className="text-xs text-blue-600">Geofence: {violation.geofenceName}</p>
+      )}
+      {violation.overrideReason && (
+        <p className="text-xs text-green-600 mt-1">✅ {violation.overrideReason}</p>
+      )}
+    </div>
+    <div className="flex items-center gap-2">
+      <span className={`text-xs px-2 py-0.5 rounded-full ${violation.resolved ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+        {violation.resolved ? 'Resolved' : 'Active'}
+      </span>
+      <span className="text-xs text-gray-400">{violation.timestamp ? new Date(violation.timestamp).toLocaleDateString() : 'N/A'}</span>
+      {!violation.resolved && !violation.overridden && (
+        <button
+          onClick={() => handleOverrideAsReturn(violation)}
+          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors flex items-center gap-1"
+          title="Mark as manager-approved return"
+        >
+          <ArrowLeft size={12} /> Override
+        </button>
+      )}
+    </div>
+  </div>
+))}
           </div>
         </div>
       )}

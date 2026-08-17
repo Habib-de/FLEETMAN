@@ -63,6 +63,18 @@ public class Incident {
     
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
+
+    @Column(name = "overridden", columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private Boolean overridden = false;
+    
+    @Column(name = "override_reason")
+    private String overrideReason;
+    
+    @Column(name = "overridden_by")
+    private String overriddenBy;
+    
+    @Column(name = "overridden_at")
+    private LocalDateTime overriddenAt;
     
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -74,6 +86,9 @@ public class Incident {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (overridden == null) {
+            overridden = false;
+        }
     }
     
     @PreUpdate

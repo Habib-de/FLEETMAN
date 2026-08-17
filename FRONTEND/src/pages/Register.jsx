@@ -113,7 +113,7 @@ const Register = ({ onNavigate }) => {
       const response = await authService.register(registerData);
       
       if (response.success) {
-        setSuccess('✅ Account created successfully! Redirecting to login...');
+        setSuccess('✅ Registration submitted! Your account is pending admin approval. You will be notified once activated.');
         setTimeout(() => {
           onNavigate('login');
         }, 2500);

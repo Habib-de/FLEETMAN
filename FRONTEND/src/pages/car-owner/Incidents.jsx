@@ -4,7 +4,7 @@ import {
   Plus, Camera, User, Search, Filter, Download,
   Map, BarChart3, AlertCircle,
   CheckCircle, Clock, Edit, Trash2,
-  AlertTriangle, X, FileText, Save, RefreshCw, Image as ImageIcon
+  AlertTriangle, X, FileText, Save, RefreshCw, Image as ImageIcon, ArrowLeft  
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { 
@@ -1230,204 +1230,214 @@ const Incidents = () => {
   };
 
   // ============================================
-  // RENDER LIST VIEW
-  // ============================================
-  const renderListView = () => (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input 
-              type="text" 
-              placeholder="Search incidents..." 
-              className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none w-40 sm:w-56"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <button 
-            onClick={() => setShowFilters(!showFilters)}
-            className="px-3 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200 flex items-center gap-1"
-          >
-            <Filter size={14} /> Filters
-          </button>
-          <select 
-            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value)}
-          >
-            <option value="today">Today</option>
-            <option value="this_week">This Week</option>
-            <option value="this_month">This Month</option>
-            <option value="last_month">Last Month</option>
-          </select>
+// RENDER LIST VIEW
+// ============================================
+const renderListView = () => (
+  <div>
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input 
+            type="text" 
+            placeholder="Search incidents..." 
+            className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none w-40 sm:w-56"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
         <button 
-          onClick={() => setShowReportModal(true)}
-          className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 flex items-center gap-2"
+          onClick={() => setShowFilters(!showFilters)}
+          className="px-3 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200 flex items-center gap-1"
         >
-          <Plus size={16} /> Report Incident
+          <Filter size={14} /> Filters
         </button>
+        <select 
+          className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+          value={dateRange}
+          onChange={(e) => setDateRange(e.target.value)}
+        >
+          <option value="today">Today</option>
+          <option value="this_week">This Week</option>
+          <option value="this_month">This Month</option>
+          <option value="last_month">Last Month</option>
+        </select>
       </div>
+      <button 
+        onClick={() => setShowReportModal(true)}
+        className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 flex items-center gap-2"
+      >
+        <Plus size={16} /> Report Incident
+      </button>
+    </div>
 
-      {showFilters && (
-        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <select 
-              className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
-              value={severityFilter}
-              onChange={(e) => setSeverityFilter(e.target.value)}
-            >
-              <option value="all">All Severities</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <select 
-              className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All Statuses</option>
-              <option value="reported">Reported</option>
-              <option value="investigating">Investigating</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-            </select>
-            <select className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
-              <option value="all">All Types</option>
-              {incidentTypes.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
+    {showFilters && (
+      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <select 
+            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value)}
+          >
+            <option value="all">All Severities</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <select 
+            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="reported">Reported</option>
+            <option value="investigating">Investigating</option>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <select className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+            <option value="all">All Types</option>
+            {incidentTypes.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
         </div>
-      )}
+      </div>
+    )}
 
-      {filteredIncidents.length > 0 ? (
-        <div className="space-y-3">
-          {filteredIncidents.map((incident) => {
-            const isPanic = incident.incidentType?.toLowerCase() === 'panic alert' || incident.incidentType === 'Panic Alert';
-            const vehicleId = incident.vehicleId || incident.vehicle_id;
-            const driverId = incident.driverId || incident.driver_id;
-            const vehicleLabel = getVehicleLabel(vehicleId);
-            const driverName = incident.driverName || getDriverName(driverId) || 'Unknown';
-            const attachments = parseAttachments(incident.attachments);
-            
-            return (
-              <div 
-                key={incident.id} 
-                className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg transition-colors cursor-pointer ${
-                  isPanic ? 'bg-red-50 hover:bg-red-100 border-2 border-red-500' : 'bg-gray-50 hover:bg-gray-100'
-                }`}
-                onClick={() => setSelectedIncident(incident)}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {isPanic && (
-                      <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full animate-pulse">
-                        🚨 PANIC
-                      </span>
-                    )}
-                    <p className="font-medium">{vehicleLabel !== 'Unknown' ? vehicleLabel : (incident.vehicle || 'N/A')}</p>
-                    <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full ${getSeverityColor(incident.severity)}`}>
-                      {incident.severity}
+    {filteredIncidents.length > 0 ? (
+      <div className="space-y-3">
+        {filteredIncidents.map((incident) => {
+          const isPanic = incident.incidentType?.toLowerCase() === 'panic alert' || incident.incidentType === 'Panic Alert';
+          const vehicleId = incident.vehicleId || incident.vehicle_id;
+          const driverId = incident.driverId || incident.driver_id;
+          const vehicleLabel = getVehicleLabel(vehicleId);
+          const driverName = incident.driverName || getDriverName(driverId) || 'Unknown';
+          const attachments = parseAttachments(incident.attachments);
+          
+          return (
+            <div 
+              key={incident.id} 
+              className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg transition-colors cursor-pointer ${
+                isPanic ? 'bg-red-50 hover:bg-red-100 border-2 border-red-500' : 'bg-gray-50 hover:bg-gray-100'
+              }`}
+              onClick={() => setSelectedIncident(incident)}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  {isPanic && (
+                    <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full animate-pulse">
+                      🚨 PANIC
                     </span>
-                    <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${getStatusColor(incident.status)}`}>
-                      {getStatusIcon(incident.status)}
-                      {getStatusLabel(incident.status)}
+                  )}
+                  {incident.isOverridden && (
+                    <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <ArrowLeft size={10} /> Manager Return
                     </span>
-                    <span className="text-[10px] sm:text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
-                      {incident.incidentType || incident.incident_type}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {incident.createdAt ? new Date(incident.createdAt).toLocaleString() : 'N/A'} · {incident.location || 'No location'}
+                  )}
+                  <p className="font-medium">{vehicleLabel !== 'Unknown' ? vehicleLabel : (incident.vehicle || 'N/A')}</p>
+                  <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full ${getSeverityColor(incident.severity)}`}>
+                    {incident.severity}
+                  </span>
+                  <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${getStatusColor(incident.status)}`}>
+                    {getStatusIcon(incident.status)}
+                    {getStatusLabel(incident.status)}
+                  </span>
+                  <span className="text-[10px] sm:text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                    {incident.incidentType || incident.incident_type}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {incident.createdAt ? new Date(incident.createdAt).toLocaleString() : 'N/A'} · {incident.location || 'No location'}
+                </p>
+                {incident.overrideReason && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    ✅ Approved return: {incident.overrideReason}
                   </p>
-                  <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-400">
-                    <span><User size={12} className="inline mr-1" /> {driverName}</span>
-                    {incident.policeReport && (
-                      <span><FileText size={12} className="inline mr-1" /> {incident.policeReport}</span>
-                    )}
-                    <span><Camera size={12} className="inline mr-1" /> {attachments.length} images</span>
-                    {attachments.length > 0 && (
-                      <span className="flex gap-1">
-                        {attachments.slice(0, 3).map((img, idx) => (
-                          <img 
-                            key={idx} 
-                            src={img} 
-                            alt="" 
-                            className="w-6 h-6 rounded object-cover border cursor-pointer hover:opacity-80 transition-opacity"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              viewImage(img);
-                            }}
-                          />
-                        ))}
-                        {attachments.length > 3 && (
-                          <span 
-                            className="text-xs bg-gray-200 px-1.5 py-0.5 rounded cursor-pointer hover:bg-gray-300"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              viewImage(attachments[3]);
-                            }}
-                          >
-                            +{attachments.length - 3}
-                          </span>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  {isPanic && incident.description && (
-                    <p className="text-xs text-red-600 mt-1 font-medium">{incident.description}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-400">
+                  <span><User size={12} className="inline mr-1" /> {driverName}</span>
+                  {incident.policeReport && (
+                    <span><FileText size={12} className="inline mr-1" /> {incident.policeReport}</span>
+                  )}
+                  <span><Camera size={12} className="inline mr-1" /> {attachments.length} images</span>
+                  {attachments.length > 0 && (
+                    <span className="flex gap-1">
+                      {attachments.slice(0, 3).map((img, idx) => (
+                        <img 
+                          key={idx} 
+                          src={img} 
+                          alt="" 
+                          className="w-6 h-6 rounded object-cover border cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            viewImage(img);
+                          }}
+                        />
+                      ))}
+                      {attachments.length > 3 && (
+                        <span 
+                          className="text-xs bg-gray-200 px-1.5 py-0.5 rounded cursor-pointer hover:bg-gray-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            viewImage(attachments[3]);
+                          }}
+                        >
+                          +{attachments.length - 3}
+                        </span>
+                      )}
+                    </span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mt-2 sm:mt-0">
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-red-600">LSL {(incident.cost || 0).toLocaleString()}</p>
-                    <div className="flex gap-1 mt-1">
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); openEditModal(incident); }}
-                        className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
-                      >
-                        <Edit size={12} className="inline" /> Edit
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); openDeleteConfirm(incident); }}
-                        className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded hover:bg-red-100"
-                      >
-                        <Trash2 size={12} className="inline" />
-                      </button>
-                    </div>
+                {isPanic && incident.description && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">{incident.description}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mt-2 sm:mt-0">
+                <div className="text-right">
+                  <p className="text-sm font-medium text-red-600">LSL {(incident.cost || 0).toLocaleString()}</p>
+                  <div className="flex gap-1 mt-1">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); openEditModal(incident); }}
+                      className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
+                    >
+                      <Edit size={12} className="inline" /> Edit
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); openDeleteConfirm(incident); }}
+                      className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded hover:bg-red-100"
+                    >
+                      <Trash2 size={12} className="inline" />
+                    </button>
                   </div>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="text-center py-8 text-gray-500">
-          <AlertCircle size={48} className="mx-auto text-gray-300 mb-3" />
-          <p>No incidents found</p>
-          <p className="text-sm">Click "Report Incident" to add your first incident</p>
-        </div>
-      )}
+            </div>
+          );
+        })}
+      </div>
+    ) : (
+      <div className="text-center py-8 text-gray-500">
+        <AlertCircle size={48} className="mx-auto text-gray-300 mb-3" />
+        <p>No incidents found</p>
+        <p className="text-sm">Click "Report Incident" to add your first incident</p>
+      </div>
+    )}
 
-      {filteredIncidents.length > 0 && (
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-gray-600">
-            Total incidents: <span className="font-semibold">{filteredIncidents.length}</span> · 
-            Panic Alerts: <span className="font-semibold text-red-600">{stats.panicAlerts}</span> · 
-            Avg cost: <span className="font-semibold">LSL {stats.total > 0 ? Math.round(stats.totalCost / stats.total).toLocaleString() : 0}</span>
-          </p>
-          <button className="text-sm text-blue-600 hover:underline flex items-center gap-1">
-            <Download size={14} /> Export Report
-          </button>
-        </div>
-      )}
-    </div>
-  );
+    {filteredIncidents.length > 0 && (
+      <div className="mt-4 p-3 bg-gray-50 rounded-lg flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-gray-600">
+          Total incidents: <span className="font-semibold">{filteredIncidents.length}</span> · 
+          Panic Alerts: <span className="font-semibold text-red-600">{stats.panicAlerts}</span> · 
+          Avg cost: <span className="font-semibold">LSL {stats.total > 0 ? Math.round(stats.totalCost / stats.total).toLocaleString() : 0}</span>
+        </p>
+        <button className="text-sm text-blue-600 hover:underline flex items-center gap-1">
+          <Download size={14} /> Export Report
+        </button>
+      </div>
+    )}
+  </div>
+);
 
   // ============================================
   // MAP VIEW COMPONENT

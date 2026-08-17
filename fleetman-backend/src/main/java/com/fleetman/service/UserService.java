@@ -20,12 +20,17 @@ public class UserService {
     private final UserRepository userRepository;
     private final TenantService tenantService;
     private final PasswordEncoder passwordEncoder;
+    public boolean existsByRole(UserRole role) {
+        return userRepository.existsByRole(role);
+    }
     
     @Transactional
     public User createUser(User user) {
         if (userRepository.existsByEmail(user.getEmail())) {
             throw new RuntimeException("Email already exists: " + user.getEmail());
         }
+
+        user.setStatus("pending");
         // user.setPasswordHash(passwordEncoder.encode(user.getPasswordHash()));
         return userRepository.save(user);
     }

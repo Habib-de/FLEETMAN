@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -73,6 +74,41 @@ public class GeofenceViolationController {
     public ResponseEntity<ApiResponse<Void>> deleteGeofenceViolation(@PathVariable String id) {
         geofenceViolationService.deleteGeofenceViolation(id);
         return ResponseEntity.ok(ApiResponse.success("Geofence violation deleted successfully", null));
+    }
+
+        // ============================================
+    // ✅ NEW: Override violation as manager-approved return
+    // ============================================
+    @PutMapping("/{id}/override-return")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<GeofenceViolationDTO>> overrideAsReturn(
+            @PathVariable String id,
+            @RequestBody(required = false) Map<String, String> request) {
+        
+        String reason = request != null ? request.get("reason") : null;
+        if (reason == null || reason.trim().isEmpty()) {
+            reason = "Manager-approved return trip";
+        }
+        
+        GeofenceViolation overridden = geofenceViolationService.overrideAsReturn(id, reason);
+        return ResponseEntity.ok(ApiResponse.success(
+            "Violation overridden as manager-approved return", 
+            convertToDTO(overridden)
+        ));
+    }
+
+    // ============================================
+    // ✅ NEW: Get overridden returns for a tenant
+    // ============================================
+    @GetMapping("/tenant/{tenantId}/overridden-returns")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner', 'driver')")
+    public ResponseEntity<ApiResponse<List<GeofenceViolationDTO>>> getOverriddenReturns(
+            @PathVariable String tenantId) {
+        List<GeofenceViolation> violations = geofenceViolationService.getOverriddenReturns(tenantId);
+        List<GeofenceViolationDTO> dtos = violations.stream()
+            .map(this::convertToDTO)
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(ApiResponse.success(dtos));
     }
 
     private GeofenceViolationDTO convertToDTO(GeofenceViolation violation) {

@@ -48,47 +48,81 @@ public class AuthController {
     private final EmailService emailService;
 
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
-        );
+public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
+    Authentication authentication = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
+    );
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = tokenProvider.generateToken(authentication);
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+    String jwt = tokenProvider.generateToken(authentication);
 
-        User user = userService.getUserByEmail(request.getEmail());
-        userService.updateLastLogin(request.getEmail());
-
-        Tenant tenant = user.getTenant();
-
-        // ✅ FIXED - Using map() instead of ifPresent to avoid lambda assignment issue
-        String driverId = null;
-        if (user.getRole() == UserRole.driver) {
-            driverId = driverRepository.findByUserId(user.getId())
-                    .map(Driver::getId)
-                    .orElse(null);
-        }
-
-        LoginResponse response = new LoginResponse(
-                jwt,
-                null,
-                user.getId(),
-                user.getEmail(),
-                user.getName(),
-                user.getRole().name().toLowerCase(),
-                tenant.getId(),
-                tenant.getName(),
-                tenant.getCardPoolingEnabled() != null && tenant.getCardPoolingEnabled(),
-                user.getAvatar(),
-                driverId
-        );
-
-        return ResponseEntity.ok(ApiResponse.success("Login successful", response));
+    User user = userService.getUserByEmail(request.getEmail());
+    
+    // ✅ ADD THIS STATUS CHECK HERE (BEFORE updateLastLogin)
+    if ("pending".equals(user.getStatus())) {
+        return ResponseEntity
+            .status(HttpStatus.FORBIDDEN)
+            .body(ApiResponse.error("Your account is pending admin approval. Please contact Mansoft for activation."));
     }
+    
+    if ("suspended".equals(user.getStatus())) {
+        return ResponseEntity
+            .status(HttpStatus.FORBIDDEN)
+            .body(ApiResponse.error("Your account has been suspended. Please contact support."));
+    }
+    
+    userService.updateLastLogin(request.getEmail());
+
+    Tenant tenant = user.getTenant();
+
+    // ✅ FIXED - Using map() instead of ifPresent to avoid lambda assignment issue
+    String driverId = null;
+    if (user.getRole() == UserRole.driver) {
+        driverId = driverRepository.findByUserId(user.getId())
+                .map(Driver::getId)
+                .orElse(null);
+    }
+
+    LoginResponse response = new LoginResponse(
+            jwt,
+            null,
+            user.getId(),
+            user.getEmail(),
+            user.getName(),
+            user.getRole().name().toLowerCase(),
+            tenant.getId(),
+            tenant.getName(),
+            tenant.getCardPoolingEnabled() != null && tenant.getCardPoolingEnabled(),
+            user.getAvatar(),
+            driverId
+    );
+
+    return ResponseEntity.ok(ApiResponse.success("Login successful", response));
+}
 
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<UserDTO>> register(@Valid @RequestBody RegisterRequest request) {
         try {
+            
+            if ("super_admin".equals(request.getRole())) {
+            // Check if super admin already exists
+            boolean superAdminExists = userService.existsByRole(UserRole.super_admin);
+            if (superAdminExists) {
+                return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error("A Super Admin already exists in the system"));
+            }
+            
+            // ✅ VALIDATE ADMIN KEY ON BACKEND
+            String adminKey = request.getAdminKey();
+            String ADMIN_SECRET_KEY = System.getenv().getOrDefault("ADMIN_SECRET_KEY", "fleetman_admin_2024");
+            if (adminKey == null || !adminKey.equals(ADMIN_SECRET_KEY)) {
+                return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error("Invalid admin registration key"));
+            }
+        }
+
             // Check if user already exists
             try {
                 userService.getUserByEmail(request.getEmail());

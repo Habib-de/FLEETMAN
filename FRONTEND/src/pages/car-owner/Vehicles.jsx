@@ -672,6 +672,14 @@ useEffect(() => {
                       🔧 Service
                     </span>
                   )}
+                  {/* ✅ Show maintenance reason */}
+{inMaintenance && vehicle.maintenanceReason && (
+  <div className="mt-1 text-[10px] text-yellow-700 bg-yellow-50 px-2 py-1 rounded border border-yellow-200 flex items-start gap-1">
+    <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
+    <span className="break-words">{vehicle.maintenanceReason}</span>
+  </div>
+)}
+                 
                   {serviceDue === 'urgent' && (
                     <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full animate-pulse">
                       ⚠️ Due Now
@@ -751,7 +759,7 @@ useEffect(() => {
           </div>
         </div>
 
-        {isExpanded && (
+                {isExpanded && (
           <div className="px-4 pb-4 pt-2 border-t border-gray-100 bg-gray-50/50">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
@@ -816,11 +824,22 @@ useEffect(() => {
                 </div>
               </div>
             </div>
+            
             <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-4 text-xs text-gray-500">
               <span>📍 {vehicle.location || 'No location set'}</span>
               <span>📅 Acquired: {vehicle.acquisitionDate || 'N/A'}</span>
               <span>💰 Cost: {vehicle.acquisitionCost || 'N/A'}</span>
             </div>
+
+            {/* ✅ Maintenance Reason - Fixed indentation and placement */}
+            {inMaintenance && vehicle.maintenanceReason && (
+              <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-xs font-medium text-yellow-700 flex items-center gap-1">
+                  <AlertCircle size={14} /> Maintenance Reason:
+                </p>
+                <p className="text-xs text-yellow-700 mt-0.5">{vehicle.maintenanceReason}</p>
+              </div>
+            )}
           </div>
         )}
       </div>

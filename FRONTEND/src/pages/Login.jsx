@@ -24,9 +24,16 @@ const Login = ({ onLogin, onNavigate }) => {
     if (response.success && response.data) {
       const userData = response.data;
       
+      // ✅ CHECK FOR PENDING STATUS
+      if (userData.status === 'pending') {
+        setError('⏳ Your account is pending admin approval. Please contact Mansoft for activation.');
+        setIsLoading(false);
+        return;
+      }
+      
       console.log('✅ User data received, has token:', !!userData.token);
       
-      // 🔥 Store token with multiple keys
+      // Store token
       if (userData.token) {
         localStorage.setItem('fleetman_token', userData.token);
         localStorage.setItem('token', userData.token);

@@ -44,6 +44,7 @@ public class VehicleDTO {
     private BigDecimal acquisitionCost;
     private LocalDate disposalDate;
     private String disposalReason;
+    private String maintenanceReason;
     
     // ============================================
     // ✅ DRIVER ASSIGNMENT

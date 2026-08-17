@@ -97,6 +97,52 @@ public class TenantController {
         return ResponseEntity.ok(ApiResponse.success(location));
     }
 
+        // ✅ MULTI-LOCATION MANAGEMENT ENDPOINTS
+    // ============================================
+
+    @GetMapping("/{id}/locations")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner', 'driver')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getLocations(@PathVariable String id) {
+        Tenant tenant = tenantService.getTenantById(id);
+        List<Map<String, Object>> locations = tenantService.getLocations(tenant);
+        return ResponseEntity.ok(ApiResponse.success("Locations retrieved", locations));
+    }
+
+    @PostMapping("/{id}/locations")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> addLocation(
+            @PathVariable String id,
+            @RequestBody Map<String, Object> locationData) {
+        
+        Tenant tenant = tenantService.getTenantById(id);
+        Map<String, Object> newLocation = tenantService.addLocation(tenant, locationData);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Location added successfully", newLocation));
+    }
+
+    @PutMapping("/{id}/locations/{locationId}")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateLocation(
+            @PathVariable String id,
+            @PathVariable String locationId,
+            @RequestBody Map<String, Object> locationData) {
+        
+        Tenant tenant = tenantService.getTenantById(id);
+        Map<String, Object> updatedLocation = tenantService.updateLocation(tenant, locationId, locationData);
+        return ResponseEntity.ok(ApiResponse.success("Location updated successfully", updatedLocation));
+    }
+
+    @DeleteMapping("/{id}/locations/{locationId}")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<Void>> deleteLocation(
+            @PathVariable String id,
+            @PathVariable String locationId) {
+        
+        Tenant tenant = tenantService.getTenantById(id);
+        tenantService.deleteLocation(tenant, locationId);
+        return ResponseEntity.ok(ApiResponse.success("Location deleted successfully", null));
+    }
+
     // ============================================
 // ✅ POOL BOOKING ENDPOINTS
 // ============================================

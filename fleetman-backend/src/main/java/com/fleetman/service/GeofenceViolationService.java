@@ -1,6 +1,8 @@
 package com.fleetman.service;
 
 import com.fleetman.entity.GeofenceViolation;
+import com.fleetman.entity.Incident;  
+import com.fleetman.entity.enums.GeofenceViolationStatus; 
 import com.fleetman.exception.ResourceNotFoundException;
 import com.fleetman.repository.GeofenceViolationRepository;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,7 @@ import java.util.List;
 public class GeofenceViolationService {
     
     private final GeofenceViolationRepository geofenceViolationRepository;
+    private final IncidentService incidentService; 
     
     @Transactional
     public GeofenceViolation createGeofenceViolation(GeofenceViolation violation) {
@@ -54,5 +57,57 @@ public class GeofenceViolationService {
     public void deleteGeofenceViolation(String id) {
         GeofenceViolation violation = getGeofenceViolationById(id);
         geofenceViolationRepository.delete(violation);
+    }
+
+        // ============================================
+    // ✅ NEW: Override violation as manager-approved return
+    // ============================================
+    @Transactional
+    public GeofenceViolation overrideAsReturn(String id, String reason) {
+        GeofenceViolation violation = getGeofenceViolationById(id);
+        
+        // Update the violation
+        violation.setOverridden(true);
+        violation.setOverrideReason(reason);
+        violation.setOverriddenBy("manager");
+        violation.setOverriddenAt(LocalDateTime.now());
+        violation.setResolved(true);
+        violation.setStatus(GeofenceViolationStatus.overridden_return);
+        
+        GeofenceViolation saved = geofenceViolationRepository.save(violation);
+        
+        // ============================================
+        // ✅ CREATE INCIDENT FOR MANAGER-APPROVED RETURN
+        // ============================================
+        try {
+            Incident incident = new Incident();
+            incident.setTenant(violation.getTenant());
+            incident.setVehicle(violation.getVehicle());
+            incident.setIncidentType("Manager Approved Return");
+            incident.setSeverity("Low");
+            incident.setStatus("Resolved");
+            incident.setLocation("Return trip approved - " + violation.getGeofence().getName());
+            incident.setDescription("Manager-approved return: " + reason);
+            incident.setReportedBy("System (Override)");
+            incident.setResolvedAt(LocalDateTime.now());
+            incident.setCreatedAt(LocalDateTime.now());
+            incident.setAttachments("[]");
+            
+            incidentService.createIncident(incident);
+            System.out.println("✅ Incident created for manager-approved return");
+            
+        } catch (Exception e) {
+            System.err.println("⚠️ Could not create incident: " + e.getMessage());
+            // Don't throw - we still want the override to work
+        }
+        
+        return saved;
+    }
+
+    // ============================================
+    // ✅ NEW: Get overridden returns for a tenant
+    // ============================================
+    public List<GeofenceViolation> getOverriddenReturns(String tenantId) {
+        return geofenceViolationRepository.findByTenantIdAndOverriddenTrueAndResolvedTrue(tenantId);
     }
 }

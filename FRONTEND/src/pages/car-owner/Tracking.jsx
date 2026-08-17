@@ -183,6 +183,81 @@ const extractRoutePoints = (geofence) => {
 };
 
 // ============================================
+// COORDINATE HELPER FUNCTIONS
+// ============================================
+
+// Calculate distance between two coordinates in km using Haversine formula
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+// Check if coordinates are within viewport radius
+const isWithinViewport = (lat, lng, centerLat, centerLng, radiusKm = 100) => {
+  if (!lat || !lng) return false;
+  const distance = calculateDistance(
+    parseFloat(lat),
+    parseFloat(lng),
+    centerLat,
+    centerLng
+  );
+  return distance <= radiusKm;
+};
+
+// Check if geofence is within viewport
+const isGeofenceInViewport = (geofence, centerLat, centerLng, radiusKm = 100) => {
+  if (!geofence) return false;
+  
+  // For circular geofences
+  if (geofence.type === 'circular' && geofence.centerLat && geofence.centerLng) {
+    return isWithinViewport(
+      parseFloat(geofence.centerLat),
+      parseFloat(geofence.centerLng),
+      centerLat,
+      centerLng,
+      radiusKm
+    );
+  }
+  
+  // For route and polygon geofences
+  if (geofence.coordinates) {
+    try {
+      const points = typeof geofence.coordinates === 'string' 
+        ? JSON.parse(geofence.coordinates) 
+        : geofence.coordinates;
+      
+      if (Array.isArray(points) && points.length > 0) {
+        // Check if ANY point is within the viewport
+        return points.some(point => {
+          const lat = point.lat || point.latitude || point[0];
+          const lng = point.lng || point.longitude || point[1];
+          if (lat && lng) {
+            return isWithinViewport(
+              parseFloat(lat),
+              parseFloat(lng),
+              centerLat,
+              centerLng,
+              radiusKm
+            );
+          }
+          return false;
+        });
+      }
+    } catch (e) {
+      console.warn('Could not parse coordinates:', e);
+    }
+  }
+  
+  return false;
+};
+
+// ============================================
 // SAFETY WRAPPER COMPONENTS
 // ============================================
 const SafeCircle = ({ center, children, ...props }) => {
@@ -860,7 +935,6 @@ const Tracking = () => {
   const [vehicleTrackingData, setVehicleTrackingData] = useState({});
   const [activeTrips, setActiveTrips] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [availableLocations, setAvailableLocations] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState(null);
   const [selectedVehicleHistory, setSelectedVehicleHistory] = useState([]);
@@ -1069,256 +1143,387 @@ const Tracking = () => {
   };
 
   // ============================================
-  // LOAD DATA FROM API
-  // ============================================
-  const loadData = async () => {
-    setIsLoading(true);
-    setError(null);
+// LOAD DATA FROM API - CORRECTED VERSION
+// ============================================
+const loadData = async () => {
+  console.log('🚀 ===== LOADDATA STARTED =====');
+  console.log('📌 Current tenant (from context):', currentTenant);
+  console.log('📌 Current user:', currentUser);
+  console.log('📌 Tenant config:', tenantConfig);
+  
+  setIsLoading(true);
+  setError(null);
+  
+  try {
+    console.log('🔄 Tracking: Loading data from API...');
+
+    // 1. Get tenant ID
+    const tenantId = currentUser?.tenantId || currentTenant;
+    console.log('📌 Tenant ID being used:', tenantId);
     
-    try {
-      console.log('🔄 Tracking: Loading data from API...');
-
-      const tenantId = currentUser?.tenantId || currentTenant;
-      
-      if (!tenantId) {
-        console.warn('⚠️ No tenant ID found');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log('📡 Fetching vehicles...');
-      const vehiclesRes = await vehicleService.getAll(tenantId).catch(() => ({ data: [] }));
-      const vehiclesData = vehiclesRes.data || [];
-      console.log(`✅ Loaded ${vehiclesData.length} vehicles`);
-
-      console.log('📡 Fetching drivers...');
-      const driversRes = await driverService.getAll(tenantId).catch(() => ({ data: [] }));
-      const driversData = driversRes.data || [];
-      setDrivers(driversData);
-      console.log(`✅ Loaded ${driversData.length} drivers`);
-
-      console.log('📡 Fetching geofences...');
-      const geofencesRes = await geofenceService.getByTenant(tenantId).catch(() => ({ data: [] }));
-      const geofencesData = geofencesRes.data || [];
-      setGeofences(geofencesData);
-      
-      locationNameCache = buildLocationCache(geofencesData);
-      console.log('📍 Built location cache with', Object.keys(locationNameCache).length, 'entries');
-      
-      console.log(`✅ Loaded ${geofencesData.length} geofences`);
-
-      console.log('📡 Fetching active trips...');
-      let activeTripsData = [];
-      try {
-        const tripsRes = await tripService.getAll(tenantId).catch(() => ({ data: [] }));
-        const allTrips = tripsRes.data || [];
-        
-        activeTripsData = allTrips
-          .filter(t => 
-            t.status === 'active' || 
-            t.status === 'In Progress' || 
-            t.status === 'planned'
-          )
-          .map(t => {
-            const geofence = t.geofence || geofencesData.find(g => g.id === t.geofenceId);
-            
-            const routeName = geofence?.name || t.routeName || 'No route assigned';
-            
-            let startLocation = t.startLocation;
-            let endLocation = t.endLocation;
-            
-            if (geofence && geofence.coordinates) {
-              const routePoints = extractRoutePoints(geofence);
-              if (routePoints.start && routePoints.end) {
-                startLocation = routePoints.start;
-                endLocation = routePoints.end;
-              }
-            }
-            
-            return {
-              ...t,
-              routeName: routeName,
-              geofenceName: geofence?.name || null,
-              routeId: geofence?.id || null,
-              startLocation: startLocation || t.startLocation || 'Start',
-              endLocation: endLocation || t.endLocation || 'End',
-            };
-          });
-      } catch (e) {
-        console.warn('Failed to load trips:', e);
-        activeTripsData = [];
-      }
-      setActiveTrips(activeTripsData);
-      console.log(`✅ Loaded ${activeTripsData.length} active trips`);
-
-      console.log('📡 Fetching tracking data...');
-      const trackingMap = {};
-      for (const v of vehiclesData) {
-        try {
-          const latestRes = await trackingService.getLatest(v.id).catch(() => ({ data: null }));
-          if (latestRes && latestRes.data) {
-            trackingMap[v.id] = latestRes.data;
-          }
-        } catch (e) {
-          console.warn(`No tracking data for vehicle ${v.id}`);
-        }
-      }
-      setVehicleTrackingData(trackingMap);
-      console.log(`✅ Loaded tracking data for ${Object.keys(trackingMap).length} vehicles`);
-
-      console.log('📡 Fetching geofence violations...');
-      let violationsData = [];
-      try {
-        const violationsRes = await geofenceService.getViolations(tenantId).catch(() => ({ data: [] }));
-        violationsData = violationsRes.data || [];
-      } catch (e) {
-        console.warn('Failed to load violations:', e);
-        violationsData = [];
-      }
-      
-      const alarmsData = violationsData
-        .filter(v => !v.resolved)
-        .map(v => ({
-          id: v.id,
-          vehicleId: v.vehicleId || null,
-          vehicle: v.vehicleRegistration || v.vehicleId || 'Unknown',
-          type: v.violationType || 'geofence',
-          lat: v.lat ? parseFloat(v.lat) : 0,
-          lng: v.lng ? parseFloat(v.lng) : 0,
-          time: v.timestamp ? new Date(v.timestamp).toLocaleString() : new Date().toLocaleString(),
-          severity: 'high',
-          message: v.violationType || 'Geofence violation detected',
-          resolved: v.resolved || false,
-          geofenceName: v.geofenceName || 'Unknown Geofence',
-          geofenceId: v.geofenceId || null
-        }));
-      setAlarms(alarmsData);
-      console.log(`✅ Loaded ${alarmsData.length} active alarms`);
-
-      // Build vehicles with real data
-      const trackingVehicles = vehiclesData.map((v, index) => {
-        const assignedDriver = driversData.find(d => 
-          d.assignedVehicleId === v.id || 
-          d.assignedVehicleRegistration === v.registration
-        );
-
-        const track = trackingMap[v.id];
-        const activeTrip = activeTripsData.find(t => 
-          t.vehicleId === v.id || t.vehicle_id === v.id
-        );
-        
-        let status = 'idle';
-        let speed = 0;
-        let lat = null;
-        let lng = null;
-        let heading = 0;
-        let fuel = null;
-        let engineTemp = null;
-        let lastUpdate = new Date();
-        let hasTracking = false;
-        let progress = '0%';
-        let elapsed = '0s';
-        let routeName = null;
-        
-        if (track) {
-          lat = track.lat ? parseFloat(track.lat) : null;
-          lng = track.lng ? parseFloat(track.lng) : null;
-          speed = track.speed ? Math.round(parseFloat(track.speed)) : 0;
-          heading = track.heading || 0;
-          fuel = track.fuelLevel ? Math.round(parseFloat(track.fuelLevel)) : null;
-          engineTemp = track.engineTemp ? Math.round(parseFloat(track.engineTemp)) : null;
-          lastUpdate = track.timestamp ? new Date(track.timestamp) : new Date();
-          status = (activeTrip && speed > 3) ? 'moving' : 'idle';
-          hasTracking = true;
-          progress = track.progress || '0%';
-          elapsed = track.elapsed || '0s';
-        }
-
-        if (!hasTracking) {
-          lat = v.lat ? parseFloat(v.lat) : mapCenter.lat + (Math.random() - 0.5) * 0.02;
-          lng = v.lng ? parseFloat(v.lng) : mapCenter.lng + (Math.random() - 0.5) * 0.02;
-          speed = 0;
-          status = 'idle';
-          fuel = 50 + Math.random() * 40;
-          hasTracking = true;
-        }
-
-        if (activeTrip) {
-          routeName = activeTrip.routeName || activeTrip.geofenceName || 'No route assigned';
-        }
-
-        const finalSpeed = activeTrip ? speed : 0;
-        const currentLocation = getLocationName(lat, lng);
-
-        return {
-          id: v.id,
-          reg: v.registration || v.id,
-          lat: lat,
-          lng: lng,
-          speed: finalSpeed,
-          status: status || 'idle',
-          heading: heading || 0,
-          driver: assignedDriver?.name || v.custodian || 'Unassigned',
-          driverId: assignedDriver?.id || null,
-          driverScore: assignedDriver?.safetyScore || 100,
-          driverPhone: assignedDriver?.phone || null,
-          driverEmail: assignedDriver?.email || null,
-          driverLicense: assignedDriver?.licenseNumber || null,
-          lastUpdate: lastUpdate,
-          fuel: fuel,
-          odometer: v.mileage || '0 km',
-          engineTemp: engineTemp,
-          make: v.make || 'Unknown',
-          model: v.model || 'Unknown',
-          year: v.year || '2024',
-          color: v.color || 'White',
-          nextService: v.nextService || 'N/A',
-          licenseExpiry: v.licenseExpiry || 'N/A',
-          location: v.location || tenantConfig?.name || 'Nairobi',
-          hasTracking: hasTracking,
-          hasActiveTrip: !!activeTrip,
-          tripId: activeTrip?.id || null,
-          tripDestination: activeTrip?.endLocation || activeTrip?.to || null,
-          tripPurpose: activeTrip?.purpose || null,
-          tripStartTime: activeTrip?.startTime || null,
-          tripStartLocation: activeTrip?.startLocation || activeTrip?.from || null,
-          routeName: routeName,
-          currentLocation: currentLocation,
-          locationName: currentLocation,
-          progress: progress,
-          elapsed: elapsed,
-        };
-      });
-
-      setVehicles(trackingVehicles);
-      console.log(`✅ ${trackingVehicles.length} vehicles ready for tracking`);
-
-      if (tenantConfig?.map?.center) {
-        setMapCenter({
-          lat: tenantConfig.map.center.lat,
-          lng: tenantConfig.map.center.lng
-        });
-        setMapZoom(tenantConfig.map.zoom || 13);
-      }
-
-      if (getAvailablePresets) {
-        setAvailableLocations(getAvailablePresets());
-      }
-
-      setLastUpdated(new Date().toLocaleTimeString());
-
-      if (isFirstLoad.current) {
-        setupWebSocket();
-        isFirstLoad.current = false;
-      }
-
-    } catch (error) {
-      console.error('❌ Tracking: Failed to load data:', error);
-      setError(error.message || 'Failed to load tracking data');
-    } finally {
+    if (!tenantId) {
+      console.warn('⚠️ No tenant ID found');
       setIsLoading(false);
+      return;
     }
-  };
+
+    // 2. Get available presets from context
+    console.log('🔍 Getting available presets...');
+    const presets = getAvailablePresets ? getAvailablePresets() : [];
+    console.log('📍 Available presets:', presets.map(p => ({ id: p.id, name: p.name, map: p.map })));
+    
+    // 3. Find the current location from presets
+    console.log(`🔍 Looking for location with ID: "${currentTenant}"`);
+    let currentLocation = presets.find(loc => loc.id === currentTenant);
+
+    // If not found by ID, try to find by name
+    if (!currentLocation && tenantConfig) {
+      console.log(`🔍 Trying to find location by name: "${tenantConfig.name}"`);
+      currentLocation = presets.find(loc => 
+        loc.name && tenantConfig.name && 
+        loc.name.toLowerCase().includes(tenantConfig.name.toLowerCase())
+      );
+    }
+
+    // If still not found, use tenantConfig directly
+    if (!currentLocation && tenantConfig) {
+      console.log('📦 Using tenantConfig directly as location');
+      currentLocation = {
+        id: currentTenant,
+        name: tenantConfig.name || 'Location',
+        map: tenantConfig.map || { center: { lat: -1.2921, lng: 36.8219 } }
+      };
+    }
+
+    console.log('📍 Current location found:', currentLocation);
+
+    // 4. Determine map center and location name
+    let centerLat, centerLng, locationName;
+
+    // ✅ FIX: FIRST PRIORITY - Use tenantConfig.map (database coordinates)
+    if (tenantConfig?.map?.center) {
+      centerLat = tenantConfig.map.center.lat;
+      centerLng = tenantConfig.map.center.lng;
+      locationName = tenantConfig.name || 'Location';
+      console.log(`✅ Using map from tenantConfig (database): ${locationName} (${centerLat}, ${centerLng})`);
+    } 
+    // SECOND PRIORITY - Use currentLocation map
+    else if (currentLocation && currentLocation.map && currentLocation.map.center) {
+      centerLat = currentLocation.map.center.lat;
+      centerLng = currentLocation.map.center.lng;
+      locationName = currentLocation.name;
+      console.log(`✅ Using map from currentLocation: ${locationName} (${centerLat}, ${centerLng})`);
+    } 
+    // FALLBACK - Default to Nairobi
+    else {
+      centerLat = -1.2921;
+      centerLng = 36.8219;
+      locationName = 'Nairobi (Default)';
+      console.log(`⚠️ Using default map: ${locationName} (${centerLat}, ${centerLng})`);
+    }
+    
+    const viewportRadius = 150; // 150km radius
+    console.log(`📍 MAP CENTER: ${centerLat}, ${centerLng}`);
+    console.log(`📍 LOCATION NAME: ${locationName}`);
+    console.log(`📍 VIEWPORT RADIUS: ${viewportRadius}km`);
+
+    // 5. Fetch vehicles
+    console.log('📡 Fetching vehicles from API...');
+    const vehiclesRes = await vehicleService.getAll(tenantId).catch(() => ({ data: [] }));
+    const vehiclesData = vehiclesRes.data || [];
+    console.log(`✅ Loaded ${vehiclesData.length} vehicles from API`);
+    console.log('📋 Vehicle list:', vehiclesData.map(v => ({ id: v.id, reg: v.registration, lat: v.lat, lng: v.lng })));
+
+    // 6. Fetch drivers
+    console.log('📡 Fetching drivers from API...');
+    const driversRes = await driverService.getAll(tenantId).catch(() => ({ data: [] }));
+    const driversData = driversRes.data || [];
+    setDrivers(driversData);
+    console.log(`✅ Loaded ${driversData.length} drivers`);
+
+    // 7. Fetch geofences with filtering
+    console.log('📡 Fetching geofences from API...');
+    const geofencesRes = await geofenceService.getByTenant(tenantId).catch(() => ({ data: [] }));
+    const allGeofences = geofencesRes.data || [];
+    console.log(`📊 Total geofences from API: ${allGeofences.length}`);
+    console.log('📋 All geofences:', allGeofences.map(g => ({ 
+      id: g.id, 
+      name: g.name, 
+      type: g.type,
+      centerLat: g.centerLat,
+      centerLng: g.centerLng,
+      hasCoordinates: !!g.coordinates
+    })));
+
+    // 8. Filter geofences by coordinates
+    console.log(`🔍 Filtering geofences within ${viewportRadius}km of (${centerLat}, ${centerLng})...`);
+    const geofencesData = allGeofences.filter(g => {
+      const isInView = isGeofenceInViewport(g, centerLat, centerLng, viewportRadius);
+      console.log(`  Geofence "${g.name}": ${isInView ? '✅ IN VIEWPORT' : '❌ OUTSIDE VIEWPORT'}`);
+      return isInView;
+    });
+    
+    console.log(`✅ Loaded ${geofencesData.length} geofences within viewport`);
+    console.log('📋 Filtered geofences:', geofencesData.map(g => g.name));
+    
+    setGeofences(geofencesData);
+    locationNameCache = buildLocationCache(geofencesData);
+
+    // 9. Fetch active trips
+    console.log('📡 Fetching active trips...');
+    let activeTripsData = [];
+    try {
+      const tripsRes = await tripService.getAll(tenantId).catch(() => ({ data: [] }));
+      const allTrips = tripsRes.data || [];
+      console.log(`📊 Total trips from API: ${allTrips.length}`);
+      
+      activeTripsData = allTrips
+        .filter(t => {
+          const isActive = t.status === 'active' || t.status === 'In Progress' || t.status === 'planned';
+          console.log(`  Trip ${t.id} (${t.status}): ${isActive ? '✅ ACTIVE' : '❌ NOT ACTIVE'}`);
+          return isActive;
+        })
+        .map(t => {
+          const geofence = t.geofence || geofencesData.find(g => g.id === t.geofenceId);
+          const routeName = geofence?.name || t.routeName || 'No route assigned';
+          
+          let startLocation = t.startLocation;
+          let endLocation = t.endLocation;
+          
+          if (geofence && geofence.coordinates) {
+            const routePoints = extractRoutePoints(geofence);
+            if (routePoints.start && routePoints.end) {
+              startLocation = routePoints.start;
+              endLocation = routePoints.end;
+            }
+          }
+          
+          return {
+            ...t,
+            routeName: routeName,
+            geofenceName: geofence?.name || null,
+            routeId: geofence?.id || null,
+            startLocation: startLocation || t.startLocation || 'Start',
+            endLocation: endLocation || t.endLocation || 'End',
+          };
+        });
+    } catch (e) {
+      console.warn('Failed to load trips:', e);
+      activeTripsData = [];
+    }
+    setActiveTrips(activeTripsData);
+    console.log(`✅ Loaded ${activeTripsData.length} active trips`);
+
+    // 10. Fetch tracking data
+    console.log('📡 Fetching tracking data for each vehicle...');
+    const trackingMap = {};
+    for (const v of vehiclesData) {
+      try {
+        const latestRes = await trackingService.getLatest(v.id).catch(() => ({ data: null }));
+        if (latestRes && latestRes.data) {
+          trackingMap[v.id] = latestRes.data;
+          console.log(`  ✅ Vehicle ${v.id}: tracking data found`);
+        } else {
+          console.log(`  ⚠️ Vehicle ${v.id}: no tracking data`);
+        }
+      } catch (e) {
+        console.warn(`No tracking data for vehicle ${v.id}`);
+      }
+    }
+    setVehicleTrackingData(trackingMap);
+    console.log(`✅ Loaded tracking data for ${Object.keys(trackingMap).length} vehicles`);
+
+    // 11. Fetch violations
+    console.log('📡 Fetching geofence violations...');
+    let violationsData = [];
+    try {
+      const violationsRes = await geofenceService.getViolations(tenantId).catch(() => ({ data: [] }));
+      violationsData = violationsRes.data || [];
+    } catch (e) {
+      console.warn('Failed to load violations:', e);
+      violationsData = [];
+    }
+    
+    const alarmsData = violationsData
+      .filter(v => !v.resolved)
+      .map(v => ({
+        id: v.id,
+        vehicleId: v.vehicleId || null,
+        vehicle: v.vehicleRegistration || v.vehicleId || 'Unknown',
+        type: v.violationType || 'geofence',
+        lat: v.lat ? parseFloat(v.lat) : 0,
+        lng: v.lng ? parseFloat(v.lng) : 0,
+        time: v.timestamp ? new Date(v.timestamp).toLocaleString() : new Date().toLocaleString(),
+        severity: 'high',
+        message: v.violationType || 'Geofence violation detected',
+        resolved: v.resolved || false,
+        geofenceName: v.geofenceName || 'Unknown Geofence',
+        geofenceId: v.geofenceId || null
+      }));
+    setAlarms(alarmsData);
+    console.log(`✅ Loaded ${alarmsData.length} active alarms`);
+
+    // 12. Build vehicles with real data
+    console.log('🏗️ Building vehicle objects with tracking data...');
+    const trackingVehicles = vehiclesData.map((v, index) => {
+      const assignedDriver = driversData.find(d => 
+        d.assignedVehicleId === v.id || 
+        d.assignedVehicleRegistration === v.registration
+      );
+
+      const track = trackingMap[v.id];
+      const activeTrip = activeTripsData.find(t => 
+        t.vehicleId === v.id || t.vehicle_id === v.id
+      );
+      
+      let status = 'idle';
+      let speed = 0;
+      let lat = null;
+      let lng = null;
+      let heading = 0;
+      let fuel = null;
+      let engineTemp = null;
+      let lastUpdate = new Date();
+      let hasTracking = false;
+      let progress = '0%';
+      let elapsed = '0s';
+      let routeName = null;
+      
+      if (track) {
+        lat = track.lat ? parseFloat(track.lat) : null;
+        lng = track.lng ? parseFloat(track.lng) : null;
+        speed = track.speed ? Math.round(parseFloat(track.speed)) : 0;
+        heading = track.heading || 0;
+        fuel = track.fuelLevel ? Math.round(parseFloat(track.fuelLevel)) : null;
+        engineTemp = track.engineTemp ? Math.round(parseFloat(track.engineTemp)) : null;
+        lastUpdate = track.timestamp ? new Date(track.timestamp) : new Date();
+        status = (activeTrip && speed > 3) ? 'moving' : 'idle';
+        hasTracking = true;
+        progress = track.progress || '0%';
+        elapsed = track.elapsed || '0s';
+      }
+
+      if (!hasTracking) {
+        lat = v.lat ? parseFloat(v.lat) : centerLat + (Math.random() - 0.5) * 0.02;
+        lng = v.lng ? parseFloat(v.lng) : centerLng + (Math.random() - 0.5) * 0.02;
+        speed = 0;
+        status = 'idle';
+        fuel = 50 + Math.random() * 40;
+        hasTracking = true;
+      }
+
+      if (activeTrip) {
+        routeName = activeTrip.routeName || activeTrip.geofenceName || 'No route assigned';
+      }
+
+      const finalSpeed = activeTrip ? speed : 0;
+      const currentLocation = getLocationName(lat, lng);
+
+      const vehicleObj = {
+        id: v.id,
+        reg: v.registration || v.id,
+        lat: lat,
+        lng: lng,
+        speed: finalSpeed,
+        status: status || 'idle',
+        heading: heading || 0,
+        driver: assignedDriver?.name || v.custodian || 'Unassigned',
+        driverId: assignedDriver?.id || null,
+        driverScore: assignedDriver?.safetyScore || 100,
+        driverPhone: assignedDriver?.phone || null,
+        driverEmail: assignedDriver?.email || null,
+        driverLicense: assignedDriver?.licenseNumber || null,
+        lastUpdate: lastUpdate,
+        fuel: fuel,
+        odometer: v.mileage || '0 km',
+        engineTemp: engineTemp,
+        make: v.make || 'Unknown',
+        model: v.model || 'Unknown',
+        year: v.year || '2024',
+        color: v.color || 'White',
+        nextService: v.nextService || 'N/A',
+        licenseExpiry: v.licenseExpiry || 'N/A',
+        location: v.location || tenantConfig?.name || 'Nairobi',
+        hasTracking: hasTracking,
+        hasActiveTrip: !!activeTrip,
+        tripId: activeTrip?.id || null,
+        tripDestination: activeTrip?.endLocation || activeTrip?.to || null,
+        tripPurpose: activeTrip?.purpose || null,
+        tripStartTime: activeTrip?.startTime || null,
+        tripStartLocation: activeTrip?.startLocation || activeTrip?.from || null,
+        routeName: routeName,
+        currentLocation: currentLocation,
+        locationName: currentLocation,
+        progress: progress,
+        elapsed: elapsed,
+        geofenceId: activeTrip?.geofenceId || null,
+      };
+      
+      console.log(`  Vehicle ${v.id} (${vehicleObj.reg}): lat=${lat}, lng=${lng}, hasActiveTrip=${!!activeTrip}`);
+      return vehicleObj;
+    });
+
+    // 13. Filter vehicles by coordinates
+    console.log(`🔍 Filtering vehicles within ${viewportRadius}km of (${centerLat}, ${centerLng})...`);
+    const locationFilteredVehicles = trackingVehicles.filter(vehicle => {
+      // Check if vehicle has coordinates and is within viewport
+      if (vehicle.lat && vehicle.lng) {
+        const isInView = isWithinViewport(
+          vehicle.lat,
+          vehicle.lng,
+          centerLat,
+          centerLng,
+          viewportRadius
+        );
+        console.log(`  Vehicle ${vehicle.reg}: lat=${vehicle.lat}, lng=${vehicle.lng} -> ${isInView ? '✅ IN VIEWPORT' : '❌ OUTSIDE VIEWPORT'}`);
+        return isInView;
+      }
+      
+      // If vehicle has a geofence, check if geofence is within viewport
+      if (vehicle.geofenceId) {
+        const geofence = geofencesData.find(g => g.id === vehicle.geofenceId);
+        if (geofence) {
+          const isInView = isGeofenceInViewport(geofence, centerLat, centerLng, viewportRadius);
+          console.log(`  Vehicle ${vehicle.reg} (via geofence ${geofence.name}): ${isInView ? '✅ IN VIEWPORT' : '❌ OUTSIDE VIEWPORT'}`);
+          return isInView;
+        }
+      }
+      
+      // If no location info, EXCLUDE it (no fallback)
+      console.log(`  Vehicle ${vehicle.reg}: ⚠️ No location info, EXCLUDING`);
+      return false;
+    });
+
+    setVehicles(locationFilteredVehicles);
+    console.log(`✅ ${locationFilteredVehicles.length} vehicles within viewport`);
+    console.log('📋 Final vehicle list:', locationFilteredVehicles.map(v => ({ reg: v.reg, lat: v.lat, lng: v.lng })));
+
+    // 14. Update map center
+    console.log(`🗺️ Setting map center to: ${centerLat}, ${centerLng}`);
+    setMapCenter({
+      lat: centerLat,
+      lng: centerLng
+    });
+    setMapZoom(tenantConfig?.map?.zoom || 13);
+
+    setLastUpdated(new Date().toLocaleTimeString());
+
+    if (isFirstLoad.current) {
+      console.log('🔌 First load - setting up WebSocket...');
+      setupWebSocket();
+      isFirstLoad.current = false;
+    }
+
+    console.log('✅ ===== LOADDATA COMPLETED =====');
+    console.log(`📊 Summary: ${geofencesData.length} geofences, ${locationFilteredVehicles.length} vehicles`);
+
+  } catch (error) {
+    console.error('❌ Tracking: Failed to load data:', error);
+    setError(error.message || 'Failed to load tracking data');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // ============================================
   // USE EFFECTS
@@ -1423,13 +1628,6 @@ const Tracking = () => {
   // ============================================
   // HANDLE FUNCTIONS
   // ============================================
-  const handleLocationChange = (e) => {
-    const newLocation = e.target.value;
-    if (switchTenant) {
-      switchTenant(newLocation);
-    }
-  };
-
   const getStatusColor = (status) => {
     switch(status) {
       case 'moving': return '#22c55e';
@@ -1774,7 +1972,7 @@ const Tracking = () => {
 
   return (
     <div className="space-y-3 md:space-y-4 overflow-x-hidden">
-      {/* Controls Bar - Mobile Responsive */}
+      {/* Controls Bar - Mobile Responsive - NO LOCATION DROPDOWN */}
       <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200">
         <div className="flex flex-wrap items-center gap-2 md:gap-3">
           <div className="flex items-center gap-2 md:gap-3 flex-wrap flex-1 min-w-[150px]">
@@ -1785,20 +1983,6 @@ const Tracking = () => {
           </div>
           
           <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
-            {availableLocations.length > 0 && (
-              <select 
-                value={currentTenant || 'nairobi'}
-                onChange={handleLocationChange}
-                className="px-2 py-1 md:px-3 md:py-1.5 text-[10px] md:text-xs border border-gray-200 rounded-lg bg-white max-w-[100px] md:max-w-none"
-              >
-                {availableLocations.map(loc => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            
             <button 
               onClick={() => setShowGeofences(!showGeofences)} 
               className={`px-2 py-1 md:px-3 md:py-1.5 text-[10px] md:text-xs rounded-lg transition-colors flex items-center gap-1 ${showGeofences ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
@@ -2267,39 +2451,39 @@ const Tracking = () => {
               </div>
 
               <div className="flex flex-wrap gap-1.5 md:gap-2 pt-4 border-t border-gray-200">
-  {selectedVehicle.lat && selectedVehicle.lng && (
-    <>
-      <button 
-        onClick={() => handleTrackVehicle(selectedVehicle)}
-        className="flex-1 min-w-[50px] bg-blue-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2"
-      >
-        <Eye size={10} className="md:w-4 md:h-4" /> 
-        <span className="text-[8px] md:text-sm">Center Map</span>
-      </button>
-      <button 
-        onClick={() => handleViewHistory(selectedVehicle)}
-        className="flex-1 min-w-[50px] bg-purple-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2"
-      >
-        <History size={10} className="md:w-4 md:h-4" /> 
-        <span className="text-[8px] md:text-sm">History</span>
-      </button>
-      <button 
-        onClick={() => handleNavigate(selectedVehicle)}
-        className="flex-1 min-w-[50px] bg-green-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2"
-      >
-        <Navigation size={10} className="md:w-4 md:h-4" /> 
-        <span className="text-[8px] md:text-sm">Navigate</span>
-      </button>
-    </>
-  )}
-  <button 
-    onClick={() => handleAlert(selectedVehicle)}
-    className={`${selectedVehicle.lat && selectedVehicle.lng ? 'flex-1 min-w-[50px]' : 'w-full'} bg-red-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2`}
-  >
-    <AlertCircle size={10} className="md:w-4 md:h-4" /> 
-    <span className="text-[8px] md:text-sm">Alert</span>
-  </button>
-</div>
+                {selectedVehicle.lat && selectedVehicle.lng && (
+                  <>
+                    <button 
+                      onClick={() => handleTrackVehicle(selectedVehicle)}
+                      className="flex-1 min-w-[50px] bg-blue-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2"
+                    >
+                      <Eye size={10} className="md:w-4 md:h-4" /> 
+                      <span className="text-[8px] md:text-sm">Center Map</span>
+                    </button>
+                    <button 
+                      onClick={() => handleViewHistory(selectedVehicle)}
+                      className="flex-1 min-w-[50px] bg-purple-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2"
+                    >
+                      <History size={10} className="md:w-4 md:h-4" /> 
+                      <span className="text-[8px] md:text-sm">History</span>
+                    </button>
+                    <button 
+                      onClick={() => handleNavigate(selectedVehicle)}
+                      className="flex-1 min-w-[50px] bg-green-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2"
+                    >
+                      <Navigation size={10} className="md:w-4 md:h-4" /> 
+                      <span className="text-[8px] md:text-sm">Navigate</span>
+                    </button>
+                  </>
+                )}
+                <button 
+                  onClick={() => handleAlert(selectedVehicle)}
+                  className={`${selectedVehicle.lat && selectedVehicle.lng ? 'flex-1 min-w-[50px]' : 'w-full'} bg-red-600 text-white px-1.5 py-1 md:px-4 md:py-2 rounded-lg text-[8px] md:text-sm font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-0.5 md:gap-2`}
+                >
+                  <AlertCircle size={10} className="md:w-4 md:h-4" /> 
+                  <span className="text-[8px] md:text-sm">Alert</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

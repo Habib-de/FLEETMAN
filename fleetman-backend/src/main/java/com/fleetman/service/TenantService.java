@@ -161,4 +161,104 @@ public List<Tenant> getTenantsWithPoolBookingRequests() {
             throw new RuntimeException("Failed to parse location: " + e.getMessage());
         }
     }
+
+        // ============================================
+    // ✅ MULTI-LOCATION MANAGEMENT METHODS
+    // ============================================
+
+    public List<Map<String, Object>> getLocations(Tenant tenant) {
+        String config = tenant.getConfig();
+        if (config == null || config.isEmpty()) {
+            return new java.util.ArrayList<>();
+        }
+        try {
+            Map<String, Object> configMap = objectMapper.readValue(config, 
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            Object locationsObj = configMap.get("locations");
+            if (locationsObj == null) {
+                return new java.util.ArrayList<>();
+            }
+            String locationsJson = objectMapper.writeValueAsString(locationsObj);
+            return objectMapper.readValue(locationsJson, 
+                    new com.fasterxml.jackson.core.type.TypeReference<java.util.List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new java.util.ArrayList<>();
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> addLocation(Tenant tenant, Map<String, Object> locationData) {
+        java.util.List<Map<String, Object>> locations = getLocations(tenant);
+        String locationId = java.util.UUID.randomUUID().toString();
+        locationData.put("id", locationId);
+        if (locations.isEmpty()) {
+            locationData.put("isDefault", true);
+        }
+        locations.add(locationData);
+        saveLocations(tenant, locations);
+        return locationData;
+    }
+
+    @Transactional
+public Map<String, Object> updateLocation(Tenant tenant, String locationId, Map<String, Object> locationData) {
+    List<Map<String, Object>> locations = getLocations(tenant);
+    
+    for (int i = 0; i < locations.size(); i++) {
+        Map<String, Object> loc = locations.get(i);
+        String locId = loc.get("id").toString(); // ✅ Convert to string safely
+        
+        if (locId.equals(locationId)) {
+            // ✅ FIX: Don't add the ID back - keep it as is
+            // Instead, create a new map with the updated data
+            Map<String, Object> updatedLoc = new HashMap<>(locationData);
+            
+            // ✅ Keep the original ID
+            updatedLoc.put("id", locationId);
+            
+            // ✅ Preserve isDefault if not provided
+            if (!updatedLoc.containsKey("isDefault") && loc.containsKey("isDefault")) {
+                updatedLoc.put("isDefault", loc.get("isDefault"));
+            }
+            
+            locations.set(i, updatedLoc);
+            saveLocations(tenant, locations);
+            return updatedLoc;
+        }
+    }
+    throw new RuntimeException("Location not found with id: " + locationId);
+}
+
+    @Transactional
+    public void deleteLocation(Tenant tenant, String locationId) {
+        java.util.List<Map<String, Object>> locations = getLocations(tenant);
+        locations.removeIf(loc -> loc.get("id").equals(locationId));
+        if (!locations.isEmpty() && locations.stream().noneMatch(loc -> Boolean.TRUE.equals(loc.get("isDefault")))) {
+            locations.get(0).put("isDefault", true);
+        }
+        saveLocations(tenant, locations);
+    }
+
+    private void saveLocations(Tenant tenant, java.util.List<Map<String, Object>> locations) {
+    try {
+        String config = tenant.getConfig();
+        Map<String, Object> configMap;
+        if (config != null && !config.isEmpty()) {
+            configMap = objectMapper.readValue(config, 
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } else {
+            configMap = new java.util.HashMap<>();
+        }
+
+        // ✅ CRITICAL: Remove old location data to avoid conflicts
+        configMap.remove("location");
+        
+        configMap.put("locations", locations);
+        tenant.setConfig(objectMapper.writeValueAsString(configMap));
+        tenantRepository.save(tenant);
+    } catch (Exception e) {
+        e.printStackTrace();
+        throw new RuntimeException("Failed to save locations: " + e.getMessage());
+    }
+}
 }

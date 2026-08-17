@@ -12,7 +12,8 @@ import {
   driverService, 
   vehicleService, 
   tripService,
-  geofenceService
+  geofenceService,
+  checklistService
 } from '../../services/api';
 import webSocketService from '../../services/websocket';
 
@@ -128,6 +129,10 @@ const CurrentTrip = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   const [activeTripId, setActiveTripId] = useState(null);
   const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
+
+  const [showChecklistConfirm, setShowChecklistConfirm] = useState(false);
+  const [checklistConfirmMessage, setChecklistConfirmMessage] = useState('');
+  const [pendingVehicleId, setPendingVehicleId] = useState(null);
   
   const isFirstLoad = useRef(true);
   const reconnectIntervalRef = useRef(null);
@@ -172,6 +177,67 @@ const CurrentTrip = () => {
     }
     
     return true;
+  };
+
+    // ============================================
+  // ✅ CHECK TODAY'S CHECKLIST BEFORE STARTING TRIP
+  // ============================================
+  const checkTodayChecklist = async (vehicleId) => {
+    try {
+      const response = await checklistService.getHistory(vehicleId, currentUser.tenantId);
+      const checklists = response?.data || [];
+      
+      // Get today's date
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Find checklist for today
+      const todayChecklist = checklists.find(c => 
+        c.inspectionDate?.split('T')[0] === today || 
+        c.createdAt?.split('T')[0] === today
+      );
+      
+      if (!todayChecklist) {
+        return { 
+          canStart: false, 
+          message: '📋 Please complete today\'s pre-trip inspection first.' 
+        };
+      }
+      
+      // Check if checklist is completed or submitted
+      const isCompleted = todayChecklist.status === 'completed' || 
+                          todayChecklist.status === 'submitted';
+      
+      if (!isCompleted) {
+        return { 
+          canStart: false, 
+          message: '📋 Please complete and submit today\'s inspection before starting a trip.' 
+        };
+      }
+      
+      // Check if there are failed items or defects
+      const hasFailedItems = (todayChecklist.failedItems || 0) > 0;
+      const hasDefects = (todayChecklist.defects || 0) > 0;
+      
+      if (hasFailedItems || hasDefects) {
+        let issues = [];
+        if (hasFailedItems) issues.push(`${todayChecklist.failedItems} failed item(s)`);
+        if (hasDefects) issues.push(`${todayChecklist.defects} defect(s)`);
+        
+        return { 
+          canStart: false, 
+          message: `⚠️ Vehicle has inspection issues (${issues.join(', ')}). Please fix them before starting.` 
+        };
+      }
+      
+      return { canStart: true, message: '✅ Inspection complete!' };
+      
+    } catch (error) {
+      console.error('Failed to check checklist:', error);
+      return { 
+        canStart: false, 
+        message: '❌ Could not verify inspection status. Please try again.' 
+      };
+    }
   };
 
   // ============================================
@@ -760,8 +826,8 @@ const CurrentTrip = () => {
     });
   };
 
-  // ============================================
-  // HANDLE START TRIP - FIXED WITH ASSIGNED ROUTE
+    // ============================================
+  // HANDLE START TRIP - SHOW CONFIRMATION FIRST
   // ============================================
   const handleStartTrip = async () => {
     // ✅ CHECK IF VEHICLE CAN TRIP
@@ -783,7 +849,35 @@ const CurrentTrip = () => {
     }
 
     const vehicleId = assignedVehicle.id;
+
+    const checklistResult = await checkTodayChecklist(vehicleId);
+    if (!checklistResult.canStart) {
+      setErrorMessage(checklistResult.message);
+      return;
+    }
+
+    // ✅ SHOW CONFIRMATION INSTEAD OF STARTING IMMEDIATELY
+    setPendingVehicleId(vehicleId);
+    setChecklistConfirmMessage(
+      '✅ Your pre-trip inspection is complete!\n\n' +
+      'All items passed. Are you ready to start the trip?\n\n' +
+      'Tap "Recheck" to review your inspection, or "Start Trip" to proceed.'
+    );
+    setShowChecklistConfirm(true);
+  };
+
+    // ============================================
+  // ✅ CONFIRM START TRIP
+  // ============================================
+  const confirmStartTrip = async () => {
+    setShowChecklistConfirm(false);
+    const vehicleId = pendingVehicleId;
     
+    if (!vehicleId) {
+      setErrorMessage('Vehicle not found. Please try again.');
+      return;
+    }
+
     const existingTrip = getActiveTrip(vehicleId);
     if (existingTrip) {
       setErrorMessage('A trip is already in progress for this vehicle');
@@ -803,16 +897,10 @@ const CurrentTrip = () => {
         
         if (assignedGeofenceId) {
           selectedRoute = availableDestinations.find(r => r.id === assignedGeofenceId);
-          if (selectedRoute) {
-            console.log('📍 Found assigned route for vehicle:', selectedRoute.name);
-          } else {
-            console.warn('⚠️ Assigned route not found in available destinations, using fallback');
-          }
         }
         
         if (!selectedRoute) {
           selectedRoute = availableDestinations[0];
-          console.warn('⚠️ No assigned route found, using fallback:', selectedRoute.name);
         }
         
         const locations = getGeofenceLocations(selectedRoute);
@@ -821,13 +909,6 @@ const CurrentTrip = () => {
         geofenceName = selectedRoute.name;
         routePoints = selectedRoute.points || [];
         purpose = 'Normal Trip';
-        
-        console.log('📍 Starting trip with route:', {
-          vehicle: vehicleId,
-          route: geofenceName,
-          start: startLocation,
-          end: endLocation
-        });
       }
 
       const newTrip = await startTrip(vehicleId, currentUser?.name || 'Driver', {
@@ -854,7 +935,6 @@ const CurrentTrip = () => {
         setIsSpeeding(false);
         setSuccessMessage(`🚗 Trip started: ${startLocation} → ${endLocation}`);
         setTimeout(() => setSuccessMessage(''), 5000);
-        
         await syncActiveTrips();
       } else {
         setErrorMessage('Failed to start trip. Please try again.');
@@ -863,6 +943,18 @@ const CurrentTrip = () => {
       console.error('Error starting trip:', error);
       setErrorMessage(error.message || 'Failed to start trip. Please try again.');
     }
+  };
+
+  // ============================================
+  // ✅ RECHECK CHECKLIST (Navigate to Checklist)
+  // ============================================
+  const recheckChecklist = () => {
+    setShowChecklistConfirm(false);
+    setPendingVehicleId(null);
+    // Navigate to Checklist page
+    window.dispatchEvent(new CustomEvent('navigateTo', { 
+      detail: { tab: 'checklist' } 
+    }));
   };
 
   // ============================================
@@ -1349,6 +1441,30 @@ const CurrentTrip = () => {
         <div className="flex flex-wrap gap-3">
           {!isTripActive ? (
             <>
+
+            {!vehicleCanTrip && assignedVehicle && assignedVehicle.status === 'Maintenance' && (
+  <div className="w-full mb-2 p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-yellow-800 text-sm flex items-start gap-2">
+    <AlertCircle size={18} className="flex-shrink-0 mt-0.5 text-yellow-600" />
+    <div>
+      <p className="font-medium">🔧 Vehicle in Maintenance</p>
+      <p className="text-xs text-yellow-700 mt-0.5">
+        {assignedVehicle.maintenanceReason || 'This vehicle is currently undergoing maintenance. Please contact your fleet manager.'}
+      </p>
+    </div>
+  </div>
+)}
+
+{!vehicleCanTrip && assignedVehicle && assignedVehicle.status === 'Decommissioned' && (
+  <div className="w-full mb-2 p-3 bg-red-50 border border-red-300 rounded-lg text-red-800 text-sm flex items-start gap-2">
+    <AlertCircle size={18} className="flex-shrink-0 mt-0.5 text-red-600" />
+    <div>
+      <p className="font-medium">❌ Vehicle Decommissioned</p>
+      <p className="text-xs text-red-700 mt-0.5">
+        This vehicle has been decommissioned. Please contact your fleet manager.
+      </p>
+    </div>
+  </div>
+)}
               <button 
                 onClick={handleStartTrip} 
                 disabled={!vehicleCanTrip}
@@ -1482,6 +1598,46 @@ const CurrentTrip = () => {
           )}
         </div>
       </div>
+
+            {/* ============================================ */}
+      {/* ✅ CHECKLIST CONFIRMATION MODAL */}
+      {/* ============================================ */}
+      {showChecklistConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={() => setShowChecklistConfirm(false)}></div>
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-green-100 mx-auto flex items-center justify-center mb-4">
+                <CheckCircle size={32} className="text-green-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Ready to Go?</h3>
+              <p className="text-gray-600 text-sm whitespace-pre-line">
+                {checklistConfirmMessage}
+              </p>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button 
+                onClick={recheckChecklist}
+                className="flex-1 bg-yellow-500 text-white px-4 py-2.5 rounded-lg hover:bg-yellow-600 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                <RefreshCw size={18} /> Recheck
+              </button>
+              <button 
+                onClick={confirmStartTrip}
+                className="flex-1 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                <Play size={18} /> Start Trip
+              </button>
+            </div>
+            <button 
+              onClick={() => setShowChecklistConfirm(false)}
+              className="mt-3 w-full text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

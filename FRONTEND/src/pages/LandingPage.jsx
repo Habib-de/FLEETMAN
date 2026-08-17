@@ -349,13 +349,14 @@ const LandingPage = ({ onNavigate }) => {
   // HANDLE NEWSLETTER SUBMIT
   // ============================================
   const handleNewsletterSubmit = (e) => {
-    e.preventDefault();
-    if (email) {
-      window.location.href = `mailto:sales@fleetman.com?subject=FLEETMAN%20Pricing%20Inquiry&body=Hi%20FLEETMAN%20Team%2C%0A%0AI%27m%20interested%20in%20learning%20more%20about%20your%20pricing%20plans.%0A%0AName%3A%20%0ACompany%3A%20%0AFleet%20Size%3A%20%0A%0APlease%20send%20me%20more%20information.%0A%0AThank%20you!`;
-      setNewsletterSubmitted(true);
-      setTimeout(() => setNewsletterSubmitted(false), 3000);
-    }
-  };
+  e.preventDefault();
+  if (email) {
+    // ✅ Include the user's email in the email body
+    window.location.href = `mailto:xabiiib0790@gmail.com?subject=FLEETMAN%20Newsletter%20Subscription&body=New%20subscriber%3A%20${encodeURIComponent(email)}%0A%0AHi%20FLEETMAN%20Team%2C%0AI%27d%20like%20to%20subscribe%20to%20your%20newsletter.%0A%0AThank%20you!`;
+    setNewsletterSubmitted(true);
+    setTimeout(() => setNewsletterSubmitted(false), 3000);
+  }
+};
 
   // ============================================
   // ENHANCED FEATURES DATA
@@ -802,8 +803,8 @@ const LandingPage = ({ onNavigate }) => {
                 <span className="hidden sm:block text-gray-300">|</span>
                 <div className="flex items-center gap-2">
                   <Mail size={18} className="text-blue-600" />
-                  <a href="mailto:xabiiiib0790@gmail.com" className="font-medium text-lg text-blue-600 hover:underline">
-                    xabiiiib0790@gmail.com
+                  <a href="mailto:xabiiib0790@gmail.com" className="font-medium text-lg text-blue-600 hover:underline">
+                    xabiiib0790@gmail.com
                   </a>
                 </div>
               </div>

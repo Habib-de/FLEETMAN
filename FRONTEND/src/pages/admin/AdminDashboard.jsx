@@ -10,6 +10,7 @@ import {
   Award, Star, Navigation, Settings, Layers, List
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useTenantConfig } from '../../context/TenantConfigContext';
 import { 
   tenantService, 
   vehicleService, 
@@ -20,7 +21,7 @@ import {
 
 const AdminDashboard = ({ setActiveTab }) => {
   const { currentUser } = useAuth();
-  const [selectedPeriod, setSelectedPeriod] = useState('week');
+  const { currentTenant, tenantConfig, tenants: allTenants } = useTenantConfig();
   const [tenants, setTenants] = useState([]);
   const [users, setUsers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -128,6 +129,42 @@ const AdminDashboard = ({ setActiveTab }) => {
   };
 
   // ============================================
+  // GET FILTERED DATA BASED ON SELECTED TENANT
+  // ============================================
+  const getFilteredData = (allTenantsData, allVehiclesData, allDriversData, allUsersData, allIncidentsData) => {
+    // If "All Tenants" is selected or no tenant selected, show everything
+    const isAllTenants = !currentTenant || currentTenant === 'all' || currentTenant === 'nairobi' && tenantConfig?.name === 'Nairobi CBD, Kenya';
+    
+    // Check if we should filter by a specific tenant
+    const filterTenantId = currentTenant && currentTenant.length > 10 ? currentTenant : null;
+    
+    console.log('🔍 Filtering dashboard data:', { currentTenant, filterTenantId, isAllTenants });
+    
+    // If no filter, return all data
+    if (isAllTenants || !filterTenantId) {
+      return {
+        tenants: allTenantsData,
+        vehicles: allVehiclesData,
+        drivers: allDriversData,
+        users: allUsersData,
+        incidents: allIncidentsData
+      };
+    }
+    
+    // Filter by specific tenant
+    const filteredTenants = allTenantsData.filter(t => t.id === filterTenantId);
+    const tenantIds = filteredTenants.map(t => t.id);
+    
+    return {
+      tenants: filteredTenants,
+      vehicles: allVehiclesData.filter(v => tenantIds.includes(v.tenantId)),
+      drivers: allDriversData.filter(d => tenantIds.includes(d.tenantId)),
+      users: allUsersData.filter(u => tenantIds.includes(u.tenantId)),
+      incidents: allIncidentsData.filter(i => tenantIds.includes(i.tenantId))
+    };
+  };
+
+  // ============================================
   // LOAD DATA FROM BACKEND
   // ============================================
   const loadData = async (showLoading = true) => {
@@ -139,16 +176,16 @@ const AdminDashboard = ({ setActiveTab }) => {
 
       // 1. Fetch all tenants
       const tenantsResponse = await tenantService.getAll();
-      const tenantsData = tenantsResponse.data || [];
-      setTenants(tenantsData);
+      const allTenantsData = tenantsResponse.data || [];
+      setTenants(allTenantsData);
 
       // 2. Load pool booking requests
       await loadPoolRequests();
 
       // 3. Fetch users from all tenants
       let allUsers = [];
-      if (tenantsData.length > 0) {
-        const userPromises = tenantsData.map(tenant => 
+      if (allTenantsData.length > 0) {
+        const userPromises = allTenantsData.map(tenant => 
           userService.getByTenant(tenant.id)
             .then(response => response.data || [])
             .catch(() => [])
@@ -156,12 +193,11 @@ const AdminDashboard = ({ setActiveTab }) => {
         const userResults = await Promise.all(userPromises);
         allUsers = userResults.flat();
       }
-      setUsers(allUsers);
 
       // 4. Fetch incidents from all tenants
       let allIncidents = [];
-      if (tenantsData.length > 0) {
-        const incidentPromises = tenantsData.map(tenant => 
+      if (allTenantsData.length > 0) {
+        const incidentPromises = allTenantsData.map(tenant => 
           incidentService.getByTenant(tenant.id)
             .then(response => response.data || [])
             .catch(() => [])
@@ -169,12 +205,11 @@ const AdminDashboard = ({ setActiveTab }) => {
         const incidentResults = await Promise.all(incidentPromises);
         allIncidents = incidentResults.flat();
       }
-      setIncidents(allIncidents);
 
       // 5. Fetch vehicles for each tenant
       let allVehicles = [];
-      if (tenantsData.length > 0) {
-        const vehiclePromises = tenantsData.map(tenant => 
+      if (allTenantsData.length > 0) {
+        const vehiclePromises = allTenantsData.map(tenant => 
           vehicleService.getAll(tenant.id)
             .then(response => response.data || [])
             .catch(() => [])
@@ -182,12 +217,11 @@ const AdminDashboard = ({ setActiveTab }) => {
         const vehicleResults = await Promise.all(vehiclePromises);
         allVehicles = vehicleResults.flat();
       }
-      setVehicles(allVehicles);
 
       // 6. Fetch drivers for each tenant
       let allDrivers = [];
-      if (tenantsData.length > 0) {
-        const driverPromises = tenantsData.map(tenant => 
+      if (allTenantsData.length > 0) {
+        const driverPromises = allTenantsData.map(tenant => 
           driverService.getAll(tenant.id)
             .then(response => response.data || [])
             .catch(() => [])
@@ -195,11 +229,19 @@ const AdminDashboard = ({ setActiveTab }) => {
         const driverResults = await Promise.all(driverPromises);
         allDrivers = driverResults.flat();
       }
-      setDrivers(allDrivers);
+
+      // 7. Filter data based on selected tenant
+      const filtered = getFilteredData(allTenantsData, allVehicles, allDrivers, allUsers, allIncidents);
+      
+      setUsers(filtered.users);
+      setIncidents(filtered.incidents);
+      setVehicles(filtered.vehicles);
+      setDrivers(filtered.drivers);
 
       setLastUpdated(new Date().toLocaleTimeString());
 
-      console.log(`✅ Dashboard loaded: ${tenantsData.length} tenants, ${allVehicles.length} vehicles, ${allDrivers.length} drivers`);
+      console.log(`✅ Dashboard loaded: ${filtered.tenants.length} tenants, ${filtered.vehicles.length} vehicles, ${filtered.drivers.length} drivers`);
+      console.log(`📊 Filtered by: ${currentTenant || 'All Tenants'}`);
 
     } catch (error) {
       console.error('❌ Failed to load dashboard data:', error);
@@ -224,14 +266,25 @@ const AdminDashboard = ({ setActiveTab }) => {
   }, []);
 
   // ============================================
+  // RELOAD WHEN TENANT CHANGES
+  // ============================================
+  useEffect(() => {
+    if (!isLoading) {
+      console.log('🔄 Tenant changed, reloading dashboard...');
+      loadData(false);
+    }
+  }, [currentTenant]);
+
+  // ============================================
   // OPEN MODAL HANDLERS
   // ============================================
   const openTenantsModal = () => {
+    const modalTenants = tenants.length > 0 ? tenants : [];
     setSelectedModal('tenants');
     setModalData({
       title: 'Tenants Overview',
       icon: Building2,
-      data: tenants,
+      data: modalTenants,
       fields: [
         { key: 'name', label: 'Name', icon: Building2 },
         { key: 'subdomain', label: 'Subdomain', icon: Globe },
@@ -355,6 +408,11 @@ const AdminDashboard = ({ setActiveTab }) => {
               <div className="text-center py-12">
                 <Icon size={64} className="mx-auto text-gray-300 mb-4" />
                 <p className="text-gray-500 text-lg">No items found</p>
+                {currentTenant && currentTenant !== 'all' && (
+                  <p className="text-sm text-gray-400 mt-2">
+                    Try selecting "All Tenants" from the header to see everything
+                  </p>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -416,7 +474,6 @@ const AdminDashboard = ({ setActiveTab }) => {
                       <button 
                         onClick={() => {
                           closeModal();
-                          // Navigate to appropriate tab with context
                           if (selectedModal === 'tenants') navigateTo('tenants');
                           else if (selectedModal === 'vehicles') navigateTo('vehicles');
                           else if (selectedModal === 'drivers') navigateTo('drivers');
@@ -437,6 +494,11 @@ const AdminDashboard = ({ setActiveTab }) => {
           <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl flex justify-between items-center">
             <span className="text-sm text-gray-500">
               Showing {data.length} {data.length === 1 ? 'item' : 'items'}
+              {currentTenant && currentTenant !== 'all' && data.length > 0 && (
+                <span className="ml-2 text-xs text-blue-500">
+                  (Filtered by tenant)
+                </span>
+              )}
             </span>
             <button 
               onClick={closeModal}
@@ -476,10 +538,17 @@ const AdminDashboard = ({ setActiveTab }) => {
     r.poolBookingEnabled && !r.poolBookingApproved
   ).length;
 
+  // Display name for the current filter
+  const getFilterDisplayName = () => {
+    if (!currentTenant || currentTenant === 'all') return 'All Tenants';
+    const foundTenant = allTenants?.find(t => t.id === currentTenant);
+    return foundTenant?.name || tenantConfig?.name || currentTenant;
+  };
+
   // Stats cards configuration with click handlers
   const stats = [
     { 
-      label: 'Total Tenants', 
+      label: `Tenants (${getFilterDisplayName()})`, 
       value: totalTenants.toString(), 
       icon: Building2, 
       change: `${totalTenants > 0 ? '+' : ''}${totalTenants} total`,
@@ -491,7 +560,7 @@ const AdminDashboard = ({ setActiveTab }) => {
       detail: `${totalTenants} tenants, ${totalUsers} users total`
     },
     { 
-      label: 'Active Vehicles', 
+      label: `Active Vehicles (${getFilterDisplayName()})`, 
       value: activeVehicles.toString(), 
       icon: Car, 
       change: `${totalVehicles} total vehicles`,
@@ -503,7 +572,7 @@ const AdminDashboard = ({ setActiveTab }) => {
       detail: `${activeVehicles} active out of ${totalVehicles}`
     },
     { 
-      label: 'Total Drivers', 
+      label: `Total Drivers (${getFilterDisplayName()})`, 
       value: totalDrivers.toString(), 
       icon: UserCircle, 
       change: `${totalDrivers} registered`,
@@ -527,7 +596,7 @@ const AdminDashboard = ({ setActiveTab }) => {
       detail: `${pendingPoolRequests} tenants waiting for approval`
     },
     { 
-      label: 'Active Alerts', 
+      label: `Active Alerts (${getFilterDisplayName()})`, 
       value: activeIncidents.toString(), 
       icon: AlertCircle, 
       change: `${criticalIncidents} critical`,
@@ -697,6 +766,14 @@ const AdminDashboard = ({ setActiveTab }) => {
           <p className="text-sm text-gray-500 mt-1">
             Welcome back, {currentUser?.name || 'Admin'}! Here's what's happening with your fleet.
           </p>
+          {currentTenant && currentTenant !== 'all' && (
+            <p className="text-xs text-blue-600 mt-1">
+              📊 Currently viewing: <span className="font-semibold">{getFilterDisplayName()}</span>
+            </p>
+          )}
+          {(!currentTenant || currentTenant === 'all') && (
+            <p className="text-xs text-gray-500 mt-1">📊 Showing all tenants</p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-400">
@@ -744,23 +821,6 @@ const AdminDashboard = ({ setActiveTab }) => {
         ))}
       </div>
 
-      {/* Period Selector */}
-      <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-gray-200 w-fit">
-        {['day', 'week', 'month', 'quarter', 'year'].map((period) => (
-          <button 
-            key={period} 
-            onClick={() => setSelectedPeriod(period)} 
-            className={`px-4 py-1.5 text-sm rounded-md capitalize transition-colors ${
-              selectedPeriod === period 
-                ? 'bg-blue-600 text-white' 
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            {period}
-          </button>
-        ))}
-      </div>
-
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Tenant Activity with Pool Requests */}
@@ -768,7 +828,11 @@ const AdminDashboard = ({ setActiveTab }) => {
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-semibold text-gray-900 flex items-center gap-2">
               <Building2 size={18} className="text-blue-600" />
-              Tenant Activity & Pool Requests
+              {currentTenant && currentTenant !== 'all' ? (
+                <span>Tenant Activity: {getFilterDisplayName()}</span>
+              ) : (
+                <span>Tenant Activity & Pool Requests</span>
+              )}
             </h3>
             <button 
               onClick={() => navigateTo('tenants')}
@@ -846,8 +910,10 @@ const AdminDashboard = ({ setActiveTab }) => {
             ) : (
               <div className="text-center py-8 text-gray-500">
                 <Building2 size={48} className="mx-auto text-gray-300 mb-3" />
-                <p className="font-medium">No tenants registered yet</p>
-                <p className="text-sm">Create a tenant to get started with fleet management</p>
+                <p className="font-medium">No tenants found</p>
+                {currentTenant && currentTenant !== 'all' && (
+                  <p className="text-sm">Try selecting "All Tenants" from the header</p>
+                )}
               </div>
             )}
           </div>

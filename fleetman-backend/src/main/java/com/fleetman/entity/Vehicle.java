@@ -111,6 +111,9 @@ public class Vehicle {
     
     @Column(name = "disposal_reason", length = 255)
     private String disposalReason;
+
+    @Column(name = "maintenance_reason", length = 500)
+    private String maintenanceReason;
     
     // ============================================
     // ✅ DRIVER ASSIGNMENT

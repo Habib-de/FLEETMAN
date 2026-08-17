@@ -202,6 +202,29 @@ export const tenantService = {
     return response;
   },
 
+  // Add these to tenantService (after updateLocation):
+
+  // ✅ MULTI-LOCATION METHODS
+  getLocations: async (tenantId) => {
+    const response = await apiCall(`/tenants/${tenantId}/locations`, 'GET');
+    return response;
+  },
+
+  addLocation: async (tenantId, locationData) => {
+    const response = await apiCall(`/tenants/${tenantId}/locations`, 'POST', locationData);
+    return response;
+  },
+
+  updateLocationById: async (tenantId, locationId, locationData) => {
+    const response = await apiCall(`/tenants/${tenantId}/locations/${locationId}`, 'PUT', locationData);
+    return response;
+  },
+
+  deleteLocation: async (tenantId, locationId) => {
+    const response = await apiCall(`/tenants/${tenantId}/locations/${locationId}`, 'DELETE');
+    return response;
+  },
+
   // ✅ ADD THESE POOL BOOKING METHODS HERE
   requestPoolBooking: async (tenantId, enabled) => {
     const response = await apiCall(`/tenants/${tenantId}/pool-booking/request?enabled=${enabled}`, 'POST');
@@ -458,6 +481,24 @@ export const geofenceService = {
     const response = await apiCall(`/geofence-violations/${id}/resolve`, 'PUT');
     return response;
   },
+
+  // ==========================================
+// ✅ NEW: Override violation as manager-approved return
+// ==========================================
+overrideAsReturn: async (id, reason) => {
+  const response = await apiCall(`/geofence-violations/${id}/override-return`, 'PUT', { 
+    reason: reason || 'Manager-approved return trip',
+    overriddenBy: 'manager',
+    overriddenAt: new Date().toISOString()
+  });
+  return response;
+},
+
+// Get overridden violations (approved returns)
+getOverriddenReturns: async (tenantId) => {
+  const response = await apiCall(`/geofence-violations/tenant/${tenantId}/overridden-returns`, 'GET');
+  return response;
+},
 };
 
 // ============================================

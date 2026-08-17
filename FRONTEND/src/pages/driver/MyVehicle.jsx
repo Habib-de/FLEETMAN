@@ -4,7 +4,7 @@ import {
   Wrench, Radio, Thermometer, Activity, Shield,
   Truck, AlertTriangle, User,
   Clock, Award, Package, AlertCircle, RefreshCw,
-  ClipboardCheck, History, Bell, Calendar, XCircle  
+  ClipboardCheck, History, Bell, Calendar, XCircle, ArrowLeft    
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { 
@@ -16,7 +16,8 @@ import {
   checklistService,
   complianceService,
   notificationService,
-  incidentService
+  incidentService,
+  geofenceService
 } from '../../services/api';
 
 // ============================================
@@ -59,6 +60,7 @@ const MyVehicle = () => {
   const [maintenanceHistory, setMaintenanceHistory] = useState([]);
   const [checklistHistory, setChecklistHistory] = useState([]);
   const [latestChecklist, setLatestChecklist] = useState(null);
+  const [overriddenReturns, setOverriddenReturns] = useState([]);
   const [tripStats, setTripStats] = useState({
     totalTrips: 0,
     totalDistance: 0,
@@ -636,13 +638,31 @@ const MyVehicle = () => {
       }
     };
 
-    // 8. Get fuel level
+    // ============================================
+    // ✅ 8. GET OVERRIDDEN RETURNS (Manager Approved)
+    // ============================================
+    try {
+      const overriddenRes = await geofenceService.getOverriddenReturns(tenantId);
+      if (overriddenRes?.success && overriddenRes?.data) {
+        // Filter for this vehicle only
+        const vehicleOverrides = overriddenRes.data.filter(v => 
+          v.vehicleId === vehicleData.id || v.vehicle_id === vehicleData.id
+        );
+        setOverriddenReturns(vehicleOverrides);
+        console.log('✅ Overridden returns found:', vehicleOverrides.length);
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not fetch overridden returns:', error.message);
+      setOverriddenReturns([]);
+    }
+
+    // 9. Get fuel level
     const fuelLevel = calculateFuelLevel(vehicleData);
 
-    // 9. Calculate next service
+    // 10. Calculate next service
     const nextService = calculateNextService(vehicleData);
 
-    // 10. Build vehicle object with all data
+    // 11. Build vehicle object with all data
     setVehicle({
       id: vehicleData.id || 'Not recorded',
       reg: vehicleData.registration || vehicleData.reg || 'Not recorded',
@@ -966,6 +986,51 @@ const MyVehicle = () => {
           ))}
         </div>
       </div>
+
+      {/* ============================================ */}
+{/* ✅ APPROVED RETURNS SECTION */}
+{/* ============================================ */}
+{overriddenReturns.length > 0 && (
+  <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-200 bg-blue-50/30">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="font-semibold text-lg flex items-center gap-2 text-blue-700">
+        <ArrowLeft size={20} className="text-blue-600" />
+        Approved Returns
+      </h3>
+      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+        {overriddenReturns.length} manager-approved
+      </span>
+    </div>
+    <div className="space-y-3">
+      {overriddenReturns.map((item, index) => (
+        <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border border-blue-200 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-full">
+              <ArrowLeft size={16} className="text-blue-600" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-800">{item.geofenceName || 'Return Trip'}</p>
+              <p className="text-xs text-gray-500">
+                {item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+              ✅ Approved
+            </span>
+            {item.reason && (
+              <p className="text-[10px] text-gray-400 mt-0.5">{item.reason}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+    <div className="mt-3 text-xs text-blue-600 bg-blue-50 p-2 rounded-lg border border-blue-100">
+      ✅ These returns were approved by management and will not affect your safety score.
+    </div>
+  </div>
+)}
 
       {/* Recent Checklists */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">

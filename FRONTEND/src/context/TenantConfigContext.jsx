@@ -126,7 +126,8 @@ export const KENYA_CITIES = {
 const TenantConfigContext = createContext();
 
 export const TenantConfigProvider = ({ children }) => {
-  const { currentUser } = useAuth();
+  // ✅ FIX 1: Get authLoading to prevent race condition
+  const { currentUser, loading: authLoading } = useAuth();
   const [currentTenant, setCurrentTenant] = useState('nairobi');
   const [tenantConfig, setTenantConfig] = useState(null);
   const [availableLocations, setAvailableLocations] = useState(Object.keys(LOCATION_PRESETS));
@@ -191,21 +192,32 @@ const loadTenants = async () => {
           setTenantConfig(config);
           setCurrentTenant(userTenant.id);
           localStorage.setItem('fleetman_tenant', userTenant.id);
+          // ✅ Save config to localStorage
+          localStorage.setItem('tenantConfig', JSON.stringify(config));
           console.log('✅ Location loaded from database:', config);
         } else {
-          // Fallback to default using tenant name
+          // ✅ FIX: Try to match tenant name to a preset for correct coordinates
+          const nameLower = (userTenant.name || '').toLowerCase();
+          const matchedPreset = Object.values(LOCATION_PRESETS).find(p =>
+            nameLower.includes(p.id) || p.id.includes(nameLower)
+          );
+          const defaultMap = matchedPreset 
+            ? matchedPreset.map 
+            : { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 };
+          
           const defaultConfig = {
             id: userTenant.id,
             name: userTenant.name,
             country: 'Kenya',
             currency: 'KES',
             timezone: 'Africa/Nairobi',
-            map: { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 },
+            map: defaultMap,
           };
           setTenantConfig(defaultConfig);
           setCurrentTenant(userTenant.id);
           localStorage.setItem('fleetman_tenant', userTenant.id);
-          console.log('📦 Using default config for tenant:', userTenant.name);
+          localStorage.setItem('tenantConfig', JSON.stringify(defaultConfig));
+          console.log('📦 Using default config for tenant:', userTenant.name, 'with map:', defaultMap);
         }
       } else {
         // Tenant not found in loaded list, try to fetch it directly
@@ -221,20 +233,31 @@ const loadTenants = async () => {
               setTenantConfig(config);
               setCurrentTenant(tenantData.id);
               localStorage.setItem('fleetman_tenant', tenantData.id);
+              localStorage.setItem('tenantConfig', JSON.stringify(config));
               console.log('✅ Location loaded from database (direct fetch):', config);
             } else {
+              // ✅ FIX: Try to match tenant name to a preset
+              const nameLower = (tenantData.name || '').toLowerCase();
+              const matchedPreset = Object.values(LOCATION_PRESETS).find(p =>
+                nameLower.includes(p.id) || p.id.includes(nameLower)
+              );
+              const defaultMap = matchedPreset 
+                ? matchedPreset.map 
+                : { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 };
+              
               const defaultConfig = {
                 id: tenantData.id,
                 name: tenantData.name,
                 country: 'Kenya',
                 currency: 'KES',
                 timezone: 'Africa/Nairobi',
-                map: { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 },
+                map: defaultMap,
               };
               setTenantConfig(defaultConfig);
               setCurrentTenant(tenantData.id);
               localStorage.setItem('fleetman_tenant', tenantData.id);
-              console.log('📦 Using default config for tenant (direct fetch):', tenantData.name);
+              localStorage.setItem('tenantConfig', JSON.stringify(defaultConfig));
+              console.log('📦 Using default config for tenant (direct fetch):', tenantData.name, 'with map:', defaultMap);
             }
           }
         } catch (e) {
@@ -244,9 +267,11 @@ const loadTenants = async () => {
           if (savedTenant && LOCATION_PRESETS[savedTenant]) {
             setCurrentTenant(savedTenant);
             setTenantConfig(LOCATION_PRESETS[savedTenant]);
+            localStorage.setItem('tenantConfig', JSON.stringify(LOCATION_PRESETS[savedTenant]));
           } else {
             setTenantConfig(LOCATION_PRESETS['nairobi']);
             setCurrentTenant('nairobi');
+            localStorage.setItem('tenantConfig', JSON.stringify(LOCATION_PRESETS['nairobi']));
           }
         }
       }
@@ -257,6 +282,7 @@ const loadTenants = async () => {
       if (savedTenant && LOCATION_PRESETS[savedTenant]) {
         setCurrentTenant(savedTenant);
         setTenantConfig(LOCATION_PRESETS[savedTenant]);
+        localStorage.setItem('tenantConfig', JSON.stringify(LOCATION_PRESETS[savedTenant]));
       } else if (tenants.length > 0) {
         // Use first tenant from loaded list
         const firstTenant = tenants[0];
@@ -271,10 +297,12 @@ const loadTenants = async () => {
         setTenantConfig(config);
         setCurrentTenant(firstTenant.id);
         localStorage.setItem('fleetman_tenant', firstTenant.id);
+        localStorage.setItem('tenantConfig', JSON.stringify(config));
         console.log('📦 Using first tenant as fallback:', firstTenant.name);
       } else {
         setTenantConfig(LOCATION_PRESETS['nairobi']);
         setCurrentTenant('nairobi');
+        localStorage.setItem('tenantConfig', JSON.stringify(LOCATION_PRESETS['nairobi']));
         console.log('📦 Using default Nairobi preset');
       }
     }
@@ -287,9 +315,11 @@ const loadTenants = async () => {
     if (savedTenant && LOCATION_PRESETS[savedTenant]) {
       setCurrentTenant(savedTenant);
       setTenantConfig(LOCATION_PRESETS[savedTenant]);
+      localStorage.setItem('tenantConfig', JSON.stringify(LOCATION_PRESETS[savedTenant]));
     } else {
       setTenantConfig(LOCATION_PRESETS['nairobi']);
       setCurrentTenant('nairobi');
+      localStorage.setItem('tenantConfig', JSON.stringify(LOCATION_PRESETS['nairobi']));
     }
   } finally {
     setIsLoading(false);
@@ -347,93 +377,184 @@ const loadTenants = async () => {
   };
 
   // ============================================
-  // INITIAL LOAD
+  // INITIAL LOAD - ✅ FIXED RACE CONDITION
   // ============================================
   useEffect(() => {
+    // ✅ FIX 1: Wait for auth to finish loading
+    if (authLoading) {
+      console.log('⏳ Auth is still loading, waiting...');
+      return;
+    }
     loadTenants();
-  }, [currentUser]);
+  }, [currentUser, authLoading]);
 
   // ============================================
-  // SWITCH TENANT - NOW SAVES TO DATABASE
-  // ============================================
-  const switchTenant = async (tenantId) => {
-    console.log(`🔄 TenantConfig: Switching to tenant: ${tenantId}`);
+// SWITCH TENANT - FIXED VERSION
+// ============================================
+const switchTenant = async (tenantId) => {
+  console.log(`🔄 TenantConfig: Switching to tenant: ${tenantId}`);
+  
+  try {
+    let config = null;
+    let tenantName = '';
+    let locationId = tenantId;
+    let foundInPresets = false;
     
-    try {
-      // Get the preset or tenant data
-      let config = null;
-      let tenantName = '';
+    // 1️⃣ FIRST: Check if this is a preset location ID (nairobi, mombasa, etc.)
+    if (LOCATION_PRESETS[tenantId]) {
+      const preset = LOCATION_PRESETS[tenantId];
+      config = {
+        id: tenantId,
+        name: preset.name,
+        country: preset.country,
+        currency: preset.currency,
+        timezone: preset.timezone,
+        map: preset.map,
+      };
+      foundInPresets = true;
+      console.log(`✅ Using preset: ${preset.name} with map:`, preset.map);
+    }
+    
+    // 2️⃣ SECOND: Check if this is a UUID (database tenant ID)
+    if (!config && tenantId.length > 20) {
+      console.log(`🔍 Looking for tenant with UUID: ${tenantId}`);
       
-      // Try to get from API first (only if super_admin)
-      if (currentUser?.role === 'super_admin') {
-        try {
-          const response = await tenantService.getById(tenantId);
-          const tenant = response.data;
-          if (tenant) {
-            tenantName = tenant.name;
+      // Try to find the tenant in the tenants list
+      const foundTenant = tenants.find(t => t.id === tenantId);
+      if (foundTenant) {
+        tenantName = foundTenant.name;
+        console.log(`✅ Found tenant in list: ${tenantName}`);
+        
+        // Try to match tenant name with a preset
+        const nameLower = foundTenant.name.toLowerCase();
+        for (const [key, preset] of Object.entries(LOCATION_PRESETS)) {
+          if (nameLower.includes(key) || key.includes(nameLower)) {
+            config = {
+              id: tenantId,
+              name: foundTenant.name,
+              country: preset.country,
+              currency: preset.currency,
+              timezone: preset.timezone,
+              map: preset.map,
+            };
+            console.log(`✅ Matched tenant "${foundTenant.name}" to preset "${key}" with map:`, preset.map);
+            break;
           }
-        } catch (e) {
-          console.warn('Failed to fetch tenant from API:', e);
         }
       }
       
-      // Get from presets
-      if (LOCATION_PRESETS[tenantId]) {
+      // If still no config, try to get location from database
+// ✅ ONLY try if tenantId is the ACTUAL tenant ID, not a location ID
+if (!config) {
+  // Check if this is the actual tenant ID (not a location ID)
+  const isActualTenantId = tenantId === currentUser?.tenantId;
+  
+  if (isActualTenantId) {
+    try {
+      const locationResponse = await tenantService.getLocation(tenantId);
+      const locationData = locationResponse.data;
+      if (locationData) {
         config = {
           id: tenantId,
-          name: tenantName || LOCATION_PRESETS[tenantId].name,
-          country: LOCATION_PRESETS[tenantId].country,
-          currency: LOCATION_PRESETS[tenantId].currency,
-          timezone: LOCATION_PRESETS[tenantId].timezone,
-          map: LOCATION_PRESETS[tenantId].map,
+          name: locationData.name || tenantName || 'My Location',
+          country: locationData.country || 'Kenya',
+          currency: locationData.currency || 'KES',
+          timezone: locationData.timezone || 'Africa/Nairobi',
+          map: locationData.map || { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 },
         };
-      } else {
-        // Custom tenant
-        const foundTenant = tenants.find(t => t.id === tenantId);
-        if (foundTenant) {
-          config = {
-            id: tenantId,
-            name: foundTenant.name,
-            country: 'Kenya',
-            currency: 'KES',
-            timezone: 'Africa/Nairobi',
-            map: { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 },
-          };
-        } else {
-          console.error('Tenant not found:', tenantId);
-          return;
-        }
+        console.log(`✅ Loaded location from database: ${config.name} with map:`, config.map);
       }
-      
-      // Update UI immediately
-      setCurrentTenant(tenantId);
-      setTenantConfig(config);
-      localStorage.setItem('fleetman_tenant', tenantId);
-      
-      // ✅ SAVE TO DATABASE
-      const tenantIdToSave = currentUser?.tenantId || tenantId;
-      await saveLocationToDatabase(tenantIdToSave, config);
-      
-      // Dispatch event
-      window.dispatchEvent(new CustomEvent('tenantChanged', { 
-        detail: { tenantId, config } 
-      }));
-      
-    } catch (error) {
-      console.error('❌ TenantConfig: Failed to switch tenant:', error);
-      
-      // Fallback: Use preset without saving to DB
-      if (LOCATION_PRESETS[tenantId]) {
-        setCurrentTenant(tenantId);
-        setTenantConfig(LOCATION_PRESETS[tenantId]);
-        localStorage.setItem('fleetman_tenant', tenantId);
-        
-        window.dispatchEvent(new CustomEvent('tenantChanged', { 
-          detail: { tenantId, config: LOCATION_PRESETS[tenantId] } 
-        }));
+    } catch (e) {
+      console.warn('Failed to load location from database:', e);
+    }
+  } else {
+    console.log(`ℹ️ Skipping getLocation for location ID (not a tenant ID): ${tenantId}`);
+  }
+}
+    }
+    
+    // 3️⃣ THIRD: Try to load from tenant config (Car Owner case)
+    if (!config && currentUser?.tenantId) {
+      try {
+        const userTenant = tenants.find(t => t.id === currentUser.tenantId);
+        if (userTenant && userTenant.config) {
+          const configData = JSON.parse(userTenant.config);
+          if (configData.locations) {
+            const location = configData.locations.find(l => l.id === tenantId);
+            if (location) {
+              // ✅ USE THE LOCATION'S MAP COORDINATES
+              const mapCenter = location.map?.center || { lat: -1.2921, lng: 36.8219 };
+              config = {
+                id: tenantId,
+                name: location.name || 'My Location',
+                country: location.country || 'Kenya',
+                currency: location.currency || 'KES',
+                timezone: location.timezone || 'Africa/Nairobi',
+                map: { 
+                  center: mapCenter,
+                  zoom: location.map?.zoom || 13
+                },
+              };
+              console.log('✅ Location found in config:', location.name, 'with map:', mapCenter);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load location from config:', e);
       }
     }
-  };
+    
+    // 4️⃣ FINAL FALLBACK: Create a default config
+    if (!config) {
+      console.log('📦 Using fallback config for location ID:', tenantId);
+      config = {
+        id: tenantId,
+        name: 'Location',
+        country: 'Kenya',
+        currency: 'KES',
+        timezone: 'Africa/Nairobi',
+        map: { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 },
+      };
+    }
+    
+    // ✅ Update UI and save to localStorage
+    console.log('📦 FINAL CONFIG:', config);
+    console.log('📍 MAP CENTER:', config.map.center);
+    
+    setCurrentTenant(tenantId);
+    setTenantConfig(config);
+    localStorage.setItem('fleetman_tenant', tenantId);
+    // ✅ CRITICAL: Save config to localStorage
+    localStorage.setItem('tenantConfig', JSON.stringify(config));
+    
+    // Save to database
+    const tenantIdToSave = currentUser?.tenantId || tenantId;
+    await saveLocationToDatabase(tenantIdToSave, config);
+    
+    // ✅ FORCE MAP UPDATE - dispatch event for tracking page
+    window.dispatchEvent(new CustomEvent('tenantChanged', { 
+      detail: { tenantId, config } 
+    }));
+    
+    console.log(`✅ Switched to: ${config.name} (${config.map.center.lat}, ${config.map.center.lng})`);
+    
+  } catch (error) {
+    console.error('❌ TenantConfig: Failed to switch tenant:', error);
+    
+    // Fallback: Use preset without saving to DB
+    if (LOCATION_PRESETS[tenantId]) {
+      const preset = LOCATION_PRESETS[tenantId];
+      setCurrentTenant(tenantId);
+      setTenantConfig(preset);
+      localStorage.setItem('fleetman_tenant', tenantId);
+      localStorage.setItem('tenantConfig', JSON.stringify(preset));
+      
+      window.dispatchEvent(new CustomEvent('tenantChanged', { 
+        detail: { tenantId, config: preset } 
+      }));
+    }
+  }
+};
 
   // ============================================
 // GET AVAILABLE PRESETS - FOR ALL ROLES
@@ -471,7 +592,17 @@ const getAvailablePresets = () => {
     const userTenant = tenants.find(t => t.id === currentUser.tenantId);
     if (userTenant) {
       let locationName = userTenant.name;
-      let locationMap = { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 };
+      
+      // ✅ FIX 2: Try to match tenant name to a preset for correct coordinates
+      const nameLower = (userTenant.name || '').toLowerCase();
+      const matchedPreset = Object.values(LOCATION_PRESETS).find(p =>
+        nameLower.includes(p.id) || p.id.includes(nameLower)
+      );
+      
+      // ✅ Use matched preset coordinates as fallback, not Nairobi
+      let locationMap = matchedPreset 
+        ? matchedPreset.map 
+        : { center: { lat: -1.2921, lng: 36.8219 }, zoom: 13 };
       
       if (userTenant.config) {
         try {

@@ -254,19 +254,30 @@ const UsersManagement = ({ setActiveTab }) => {
   };
 
   const openEditModal = (user) => {
-    setModalType('edit');
-    setSelectedUser(user);
-    setFormData({
-      name: user.name || '',
-      email: user.email || '',
-      phone: user.phone || '',
-      password: '',
-      role: user.role || 'car_owner',
-      tenantId: user.tenantId || (tenants.length > 0 ? tenants[0].id : ''),
-      status: user.status || 'Active'
-    });
-    setShowModal(true);
+  // ✅ Status mapping: database value -> UI display value
+  const statusMap = {
+    'active': 'Active',
+    'pending': 'Pending',
+    'inactive': 'Inactive',
+    'suspended': 'Suspended'
   };
+  
+  // Get the correct UI status
+  const uiStatus = statusMap[user.status?.toLowerCase()] || 'Active';
+  
+  setModalType('edit');
+  setSelectedUser(user);
+  setFormData({
+    name: user.name || '',
+    email: user.email || '',
+    phone: user.phone || '',
+    password: '',
+    role: user.role || 'car_owner',
+    tenantId: user.tenantId || (tenants.length > 0 ? tenants[0].id : ''),
+    status: uiStatus  // ✅ This will now show "Pending" for pending users
+  });
+  setShowModal(true);
+};
 
   const openViewModal = (user) => {
     setModalType('view');

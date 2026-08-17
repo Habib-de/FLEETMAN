@@ -171,21 +171,8 @@ const loadData = async (showLoading = true) => {
       const violations = driverViolations[driverId] || 0;
       const monthlyScores = driverMonthlyScores[driverId] || Array(12).fill(80);
       
-      // Calculate safety score
+      // ✅ Use the database value directly (backend calculates safety score)
       let safetyScore = d.safetyScore || d.safety_score || 100;
-      
-      // Deduct for violations
-      if (violations > 0) {
-        safetyScore = Math.max(0, safetyScore - (violations * 5));
-      }
-      
-      // Bonus for high trip count
-      if (tripsCount > 20) {
-        safetyScore = Math.min(100, safetyScore + 3);
-      } else if (tripsCount > 10) {
-        safetyScore = Math.min(100, safetyScore + 1);
-      }
-      
       safetyScore = Math.round(Math.max(0, Math.min(100, safetyScore)));
 
       // Find assigned vehicle
@@ -233,13 +220,17 @@ const loadData = async (showLoading = true) => {
     });
 
     // Normalize vehicles
-    const normalizedVehicles = vehiclesData.map(v => ({
-      ...v,
-      id: v.id || v.vehicleId,
-      reg: v.registration || v.id,
-      driver_id: v.driverId || v.driver_id || null,
-      driver_name: v.driverName || v.driver_name || null,
-    }));
+    // In loadData function - when normalizing vehicles
+const normalizedVehicles = vehiclesData
+  .filter(v => v.tenantId === tenantId || !v.tenantId)  // ✅ Filter by tenant
+  .map(v => ({
+    ...v,
+    id: v.id || v.vehicleId,
+    reg: v.registration || v.id,
+    driver_id: v.driverId || v.driver_id || null,
+    driver_name: v.driverName || v.driver_name || null,
+    tenantId: v.tenantId || tenantId,  // ✅ Ensure tenantId is set
+  }));
 
     setDrivers(normalizedDrivers);
     setVehicles(normalizedVehicles);
@@ -346,14 +337,26 @@ useEffect(() => {
   };
 
   const getAvailableVehicles = () => {
-    const currentVehicleId = selectedDriver?.assigned_vehicle || null;
-    if (vehicles.length === 0) return [];
-    return vehicles.filter(vehicle => {
-      if (!vehicle.driver_id) return true;
-      if (vehicle.driver_id === selectedDriver?.id) return true;
+  const currentVehicleId = selectedDriver?.assigned_vehicle || null;
+  const tenantId = currentUser?.tenantId;
+  
+  if (vehicles.length === 0) return [];
+  
+  return vehicles.filter(vehicle => {
+    // ✅ Filter by tenant first
+    if (vehicle.tenantId && vehicle.tenantId !== tenantId) {
       return false;
-    });
-  };
+    }
+    
+    // If vehicle has no driver assigned, show it
+    if (!vehicle.driver_id) return true;
+    
+    // If vehicle is assigned to the current driver being edited, show it
+    if (vehicle.driver_id === selectedDriver?.id) return true;
+    
+    return false;
+  });
+};
 
   // ============================================
   // FILTER DRIVERS
@@ -457,7 +460,7 @@ useEffect(() => {
 
       const newDriver = {
         tenant: { id: tenantId },
-        userId: userId,
+        user: { id: userId }, 
         name: formData.name.trim(),
         email: formData.email.trim(),
         phone: formData.phone || null,

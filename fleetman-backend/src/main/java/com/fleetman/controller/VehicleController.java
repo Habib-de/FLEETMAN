@@ -115,6 +115,7 @@ public class VehicleController {
         dto.setAcquisitionCost(vehicle.getAcquisitionCost());
         dto.setDisposalDate(vehicle.getDisposalDate());
         dto.setDisposalReason(vehicle.getDisposalReason());
+        dto.setMaintenanceReason(vehicle.getMaintenanceReason());
         dto.setDriverId(vehicle.getDriver() != null ? vehicle.getDriver().getId() : null);
         dto.setDriverName(vehicle.getDriver() != null ? vehicle.getDriver().getName() : null);
         

@@ -16,4 +16,6 @@ public interface GeofenceViolationRepository extends JpaRepository<GeofenceViola
     List<GeofenceViolation> findByGeofenceId(String geofenceId);
     
     List<GeofenceViolation> findByResolvedFalse();
+
+    List<GeofenceViolation> findByTenantIdAndOverriddenTrueAndResolvedTrue(String tenantId);
 }

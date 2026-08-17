@@ -31,7 +31,7 @@ public class DemoController {
             String userEmailBody = buildUserConfirmationEmail(request);
             
             // 3. Send email to your sales team
-            String salesEmail = "sales@fleetman.com"; // Replace with your actual sales email
+            String salesEmail = "xabiiib0790@gmail.com"; // Replace with your actual sales email
             emailService.sendEmail(salesEmail, "🔔 New Demo Booking Request from " + request.getName(), teamEmailBody);
             System.out.println("✅ Demo request email sent to sales team: " + salesEmail);
             
