@@ -93,6 +93,15 @@ public class Vehicle {
     
     @Column(name = "fuel_type", length = 50)
     private String fuelType;
+
+    @Column(name = "fuel_tank_capacity", precision = 10, scale = 2)
+    private BigDecimal fuelTankCapacity;  // Tank size in litres
+
+    @Column(name = "current_fuel_level", precision = 10, scale = 2)
+    private BigDecimal currentFuelLevel;  // Current fuel in litres or percentage
+
+    @Column(name = "last_fuel_report")
+    private LocalDateTime lastFuelReport;  // When fuel was last reported
     
     @Column(name = "engine_size", length = 50)
     private String engineSize;

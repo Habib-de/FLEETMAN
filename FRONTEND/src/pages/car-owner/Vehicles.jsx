@@ -59,6 +59,7 @@ const Vehicles = ({ setActiveTab: setActiveTabProp }) => {
     mileage: '',
     color: '',
     fuelType: 'Diesel',
+    fuelTankCapacity: '',
     engineSize: '',
     transmission: 'Manual',
     acquisitionDate: '',
@@ -430,6 +431,7 @@ useEffect(() => {
       mileage: '',
       color: '',
       fuelType: 'Diesel',
+      fuelTankCapacity: '',
       engineSize: '',
       transmission: 'Manual',
       acquisitionDate: '',
@@ -471,6 +473,7 @@ useEffect(() => {
       mileage: vehicle.mileage || '',
       color: vehicle.color || '',
       fuelType: vehicle.fuelType || 'Diesel',
+      fuelTankCapacity: vehicle.fuelTankCapacity || '',
       engineSize: vehicle.engineSize || '',
       transmission: vehicle.transmission || 'Manual',
       acquisitionDate: vehicle.acquisitionDate || '',
@@ -527,6 +530,7 @@ useEffect(() => {
         custodian: formData.custodian || null,
         color: formData.color || null,
         fuelType: formData.fuelType || null,
+        fuelTankCapacity: formData.fuelTankCapacity ? parseFloat(formData.fuelTankCapacity) : null,
         engineSize: formData.engineSize || null,
         transmission: formData.transmission || null,
         acquisitionDate: formData.acquisitionDate || null,
@@ -579,6 +583,7 @@ useEffect(() => {
         custodian: formData.custodian || selectedVehicle.custodian,
         color: formData.color || selectedVehicle.color,
         fuelType: formData.fuelType || selectedVehicle.fuelType,
+        fuelTankCapacity: formData.fuelTankCapacity ? parseFloat(formData.fuelTankCapacity) : null,
         engineSize: formData.engineSize || selectedVehicle.engineSize,
         transmission: formData.transmission || selectedVehicle.transmission,
         acquisitionDate: formData.acquisitionDate || selectedVehicle.acquisitionDate,
@@ -726,12 +731,28 @@ useEffect(() => {
               <p className="text-sm font-medium">{vehicle.mileage || '0 km'}</p>
             </div>
             <div className="text-center">
-              <p className="text-[10px] text-gray-400">Fuel</p>
-              <div className="flex items-center justify-center gap-1">
-                <Fuel size={12} className="text-blue-500" />
-                <p className="text-sm font-medium">{vehicle.fuelEfficiency || 'N/A'}%</p>
-              </div>
+    <p className="text-[10px] text-gray-400">Fuel</p>
+    <div className="flex items-center justify-center gap-1">
+        <Fuel size={12} className="text-blue-500" />
+        <div className="flex items-center gap-1">
+            <div className="w-10 bg-gray-200 rounded-full h-1.5">
+                <div 
+                    className={`h-1.5 rounded-full transition-all duration-500 ${
+                        (vehicle.currentFuelLevel || 0) > 50 ? 'bg-green-500' :
+                        (vehicle.currentFuelLevel || 0) > 25 ? 'bg-yellow-500' :
+                        'bg-red-500 animate-pulse'
+                    }`}
+                    style={{ 
+                        width: `${Math.min((vehicle.currentFuelLevel || 0) / (vehicle.fuelTankCapacity || 80) * 100, 100)}%` 
+                    }}
+                />
             </div>
+            <span className="text-xs font-medium">
+                {Math.round((vehicle.currentFuelLevel || 0) / (vehicle.fuelTankCapacity || 80) * 100)}%
+            </span>
+        </div>
+    </div>
+</div>
             <div className="text-center">
               <p className="text-[10px] text-gray-400">Driver</p>
               <p className="text-sm font-medium truncate" title={driverName}>
@@ -769,6 +790,12 @@ useEffect(() => {
                   <div className="flex justify-between"><span className="text-gray-500">Engine:</span> <span className="font-medium">{vehicle.engineSize || 'N/A'}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Transmission:</span> <span className="font-medium">{vehicle.transmission || 'N/A'}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Fuel Type:</span> <span className="font-medium">{vehicle.fuelType || 'N/A'}</span></div>
+                  <div className="flex justify-between">
+    <span className="text-gray-500">Fuel Tank:</span>
+    <span className="font-medium">
+        {vehicle.fuelTankCapacity ? `${vehicle.fuelTankCapacity} L` : 'N/A'}
+    </span>
+</div>
                 </div>
               </div>
               <div>
@@ -1015,6 +1042,26 @@ useEffect(() => {
                   <option value="Hybrid">Hybrid</option>
                 </select>
               </div>
+
+              <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">
+        Fuel Tank Capacity (Litres)
+    </label>
+    <input 
+        type="number" 
+        step="0.1"
+        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+        placeholder="e.g., 80"
+        value={formData.fuelTankCapacity}
+        onChange={(e) => setFormData({
+            ...formData, 
+            fuelTankCapacity: e.target.value
+        })}
+    />
+    <p className="text-[10px] text-gray-400 mt-1">
+        Used to calculate fuel level percentage
+    </p>
+</div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Transmission</label>
                 <select 

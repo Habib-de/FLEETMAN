@@ -116,6 +116,11 @@ public class VehicleController {
         dto.setDisposalDate(vehicle.getDisposalDate());
         dto.setDisposalReason(vehicle.getDisposalReason());
         dto.setMaintenanceReason(vehicle.getMaintenanceReason());
+        dto.setFuelTankCapacity(vehicle.getFuelTankCapacity() != null ? 
+        vehicle.getFuelTankCapacity().doubleValue() : null);
+        dto.setCurrentFuelLevel(vehicle.getCurrentFuelLevel() != null ? 
+        vehicle.getCurrentFuelLevel().doubleValue() : null);
+        dto.setLastFuelReport(vehicle.getLastFuelReport());
         dto.setDriverId(vehicle.getDriver() != null ? vehicle.getDriver().getId() : null);
         dto.setDriverName(vehicle.getDriver() != null ? vehicle.getDriver().getName() : null);
         

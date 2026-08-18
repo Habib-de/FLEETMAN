@@ -45,10 +45,19 @@ public class VehicleDTO {
     private LocalDate disposalDate;
     private String disposalReason;
     private String maintenanceReason;
+
+    // ============================================
+    // ✅ FUEL MANAGEMENT FIELDS
+    // ============================================
+    private Double fuelTankCapacity;    // Tank size in litres
+    private Double currentFuelLevel;    // Current fuel level (litres or %)
+    private LocalDateTime lastFuelReport; // When fuel was last reported
     
     // ============================================
     // ✅ DRIVER ASSIGNMENT
     // ============================================
     private String driverId;
     private String driverName;
+
+    
 }

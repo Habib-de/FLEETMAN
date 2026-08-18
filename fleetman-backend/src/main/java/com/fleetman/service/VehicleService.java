@@ -64,6 +64,8 @@ public class VehicleService {
     @Transactional
     public Vehicle updateVehicle(String id, Vehicle vehicleDetails) {
         Vehicle vehicle = getVehicleById(id);
+
+        vehicleDetails.setTenant(vehicle.getTenant());
         
         // ✅ Store old driver before updating
         Driver oldDriver = vehicle.getDriver();
@@ -93,6 +95,9 @@ public class VehicleService {
         // ✅ NEW FIELDS
         vehicle.setColor(vehicleDetails.getColor());
         vehicle.setFuelType(vehicleDetails.getFuelType());
+        vehicle.setFuelTankCapacity(vehicleDetails.getFuelTankCapacity());
+        vehicle.setCurrentFuelLevel(vehicleDetails.getCurrentFuelLevel());
+        vehicle.setLastFuelReport(vehicleDetails.getLastFuelReport());
         vehicle.setEngineSize(vehicleDetails.getEngineSize());
         vehicle.setTransmission(vehicleDetails.getTransmission());
         vehicle.setAcquisitionDate(vehicleDetails.getAcquisitionDate());

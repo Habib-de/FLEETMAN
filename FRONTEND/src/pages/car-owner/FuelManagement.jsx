@@ -679,6 +679,61 @@ if (finalOdometer > vehicleMileage) {
   setSuccessMessage('✅ Fuel refill logged successfully!');
 }
 
+// ============================================
+// ✅ STEP 6.5: UPDATE FUEL LEVEL (ADD THIS)
+// ============================================
+try {
+    // Get the FULL vehicle data first
+    const fullVehicleRes = await vehicleService.getById(formData.vehicle_id);
+    const fullVehicle = fullVehicleRes.data;
+    
+    if (!fullVehicle) {
+        console.warn('⚠️ Cannot update fuel level - vehicle data not available');
+    } else {
+        const tankCapacity = parseFloat(fullVehicle.fuelTankCapacity) || 80;
+        const litresAdded = parseFloat(formData.litres) || 0;
+        
+        let currentFuelLitres = parseFloat(fullVehicle.currentFuelLevel) || 0;
+if (currentFuelLitres <= 100 && currentFuelLitres > 0 && currentFuelLitres <= tankCapacity) {
+    // This might be percentage, convert to litres
+    currentFuelLitres = (currentFuelLitres / 100) * tankCapacity;
+}
+        const newFuelLitres = Math.min(tankCapacity, currentFuelLitres + litresAdded);
+        const fuelLevelPercent = (newFuelLitres / tankCapacity) * 100;
+        
+        console.log(`📊 Fuel level calculation:`, {
+            tankCapacity,
+            litresAdded,
+            currentFuelLitres,
+            newFuelLitres,
+            fuelLevelPercent
+        });
+        
+        // Update vehicle with new fuel level
+        const fuelUpdatePayload = {
+            ...fullVehicle,
+            currentFuelLevel: Math.round(newFuelLitres * 10) / 10,  // ✅ Store LITRES, not percentage
+            lastFuelReport: new Date().toISOString()
+        };
+        
+        // Remove fields that shouldn't be sent
+        delete fuelUpdatePayload.id;
+        delete fuelUpdatePayload.createdAt;
+        delete fuelUpdatePayload.updatedAt;
+        
+        const fuelUpdateResponse = await vehicleService.update(formData.vehicle_id, fuelUpdatePayload);
+        
+        if (fuelUpdateResponse?.success) {
+            console.log(`✅ Fuel level updated: ${Math.round(fuelLevelPercent)}%`);
+            setSuccessMessage(`✅ Fuel refill logged! Fuel level: ${Math.round(fuelLevelPercent)}%`);
+        } else {
+            console.warn('⚠️ Fuel level update failed');
+        }
+    }
+} catch (fuelError) {
+    console.error('❌ Could not update fuel level:', fuelError);
+}
+
         // ============================================
         // STEP 7: CREATE ALARM FOR ANOMALIES
         // ============================================
@@ -875,6 +930,65 @@ if (finalOdometer > vehicleMileage) {
   setSuccessMessage('✅ Fuel refill updated successfully!');
 }
 
+// ============================================
+// ✅ STEP 6.5: UPDATE FUEL LEVEL (EDIT) - FIXED
+// ============================================
+try {
+    console.log('📊 Starting fuel level update (edit)...');
+    
+    const vehicleId = editFormData.vehicle_id;
+    const fuelVehicleRes = await vehicleService.getById(vehicleId);
+    const fuelVehicle = fuelVehicleRes.data;
+    
+    if (fuelVehicle) {
+        const tankCapacity = parseFloat(fuelVehicle.fuelTankCapacity) || 80;
+        const newLitresAdded = parseFloat(editFormData.litres) || 0;
+        
+        // ✅ Get ALL refills for this vehicle
+        const allRefillsRes = await fuelService.getByVehicle(vehicleId);
+        const allRefills = allRefillsRes?.data || [];
+        
+        // ✅ Calculate total fuel from OTHER refills (excluding the one being edited)
+        let totalOtherFuel = 0;
+        allRefills.forEach(refill => {
+            if (refill.id !== selectedRefill.id) {
+                totalOtherFuel += parseFloat(refill.litres) || 0;
+            }
+        });
+        
+        // ✅ Add the new litres amount (replace the old one)
+        const newFuelLitres = Math.min(tankCapacity, totalOtherFuel + newLitresAdded);
+        const fuelLevelPercent = (newFuelLitres / tankCapacity) * 100;
+        
+        console.log(`📊 Fuel level calculation (edit):`, {
+            tankCapacity,
+            totalOtherFuel,
+            newLitresAdded,
+            newFuelLitres,
+            fuelLevelPercent
+        });
+        
+        // ✅ Update vehicle with new fuel level
+        const fuelUpdatePayload = {
+            ...fuelVehicle,
+            currentFuelLevel: Math.round(newFuelLitres * 10) / 10,
+            lastFuelReport: new Date().toISOString()
+        };
+        delete fuelUpdatePayload.id;
+        delete fuelUpdatePayload.createdAt;
+        delete fuelUpdatePayload.updatedAt;
+        
+        const fuelUpdateResponse = await vehicleService.update(vehicleId, fuelUpdatePayload);
+        
+        if (fuelUpdateResponse?.success) {
+            console.log(`✅ Fuel level updated (edit): ${newFuelLitres.toFixed(1)}L (${Math.round(fuelLevelPercent)}%)`);
+            setSuccessMessage(`✅ Refill updated! Fuel level: ${Math.round(fuelLevelPercent)}%`);
+        }
+    }
+} catch (fuelError) {
+    console.error('❌ Could not update fuel level (edit):', fuelError);
+}
+
         // ============================================
         // STEP 7: UPDATE ALARM FOR ANOMALIES
         // ============================================
@@ -936,40 +1050,87 @@ if (finalOdometer > vehicleMileage) {
     if (!selectedRefill) return;
 
     try {
-      const response = await fuelService.delete(selectedRefill.id);
-      if (response?.success) {
-        // Remove anomaly if exists
-        try {
-          const anomalies = JSON.parse(localStorage.getItem('fuel_anomalies') || '[]');
-          const filtered = anomalies.filter(a => a.refillId !== selectedRefill.id);
-          localStorage.setItem('fuel_anomalies', JSON.stringify(filtered));
-        } catch (e) {}
+        const response = await fuelService.delete(selectedRefill.id);
         
-        setSuccessMessage('✅ Fuel refill deleted successfully!');
-        
-        // ============================================
-        // DISPATCH EVENT FOR VEHICLES PAGE
-        // ============================================
-        window.dispatchEvent(new CustomEvent('fuelRefillDeleted', {
-          detail: { 
-            vehicleId: selectedRefill.vehicle_id || selectedRefill.vehicleId,
-            refillId: selectedRefill.id 
-          }
-        }));
-        console.log('📤 fuelRefillDeleted event dispatched for vehicle:', selectedRefill.vehicle_id || selectedRefill.vehicleId);
-        
-        setShowDeleteConfirm(false);
-        setSelectedRefill(null);
-        await loadData();
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } else {
-        setErrorMessage('Failed to delete refill. Please try again.');
-      }
+        if (response?.success) {
+            // Remove anomaly if exists
+            try {
+                const anomalies = JSON.parse(localStorage.getItem('fuel_anomalies') || '[]');
+                const filtered = anomalies.filter(a => a.refillId !== selectedRefill.id);
+                localStorage.setItem('fuel_anomalies', JSON.stringify(filtered));
+            } catch (e) {}
+
+            // ============================================
+            // ✅ RECALCULATE FUEL LEVEL FROM REMAINING REFILLS
+            // ============================================
+            try {
+                const vehicleId = selectedRefill.vehicle_id || selectedRefill.vehicleId;
+                
+                // Get vehicle details
+                const vehicleRes = await vehicleService.getById(vehicleId);
+                const vehicle = vehicleRes.data;
+                const tankCapacity = parseFloat(vehicle?.fuelTankCapacity) || 80;
+                
+                // Get ALL remaining refills for this vehicle
+                const remainingRefillsRes = await fuelService.getByVehicle(vehicleId);
+                const remainingRefills = remainingRefillsRes?.data || [];
+                
+                // Calculate total litres from remaining refills
+                let totalLitres = 0;
+                remainingRefills.forEach(refill => {
+                    totalLitres += parseFloat(refill.litres) || 0;
+                });
+                
+                // Cap at tank capacity
+                const newFuelLitres = Math.min(tankCapacity, totalLitres);
+                const fuelLevelPercent = (newFuelLitres / tankCapacity) * 100;
+                
+                console.log(`📊 Recalculated fuel level after deletion:`, {
+                    remainingRefills: remainingRefills.length,
+                    totalLitres,
+                    newFuelLitres,
+                    fuelLevelPercent
+                });
+                
+                // Update vehicle with new fuel level
+                if (vehicle) {
+                    const fuelUpdatePayload = {
+                        ...vehicle,
+                        currentFuelLevel: Math.round(newFuelLitres * 10) / 10,
+                        lastFuelReport: remainingRefills.length > 0 ? new Date().toISOString() : null
+                    };
+                    delete fuelUpdatePayload.id;
+                    delete fuelUpdatePayload.createdAt;
+                    delete fuelUpdatePayload.updatedAt;
+                    
+                    await vehicleService.update(vehicleId, fuelUpdatePayload);
+                    console.log(`✅ Fuel level updated to ${Math.round(fuelLevelPercent)}% (${newFuelLitres}L)`);
+                }
+            } catch (fuelError) {
+                console.error('❌ Could not recalculate fuel level:', fuelError);
+            }
+
+            // Dispatch event
+            window.dispatchEvent(new CustomEvent('fuelRefillDeleted', {
+                detail: {
+                    vehicleId: selectedRefill.vehicle_id || selectedRefill.vehicleId,
+                    refillId: selectedRefill.id
+                }
+            }));
+            
+            setSuccessMessage('✅ Fuel refill deleted successfully!');
+            setShowDeleteConfirm(false);
+            setSelectedRefill(null);
+            await loadData();
+            setTimeout(() => setSuccessMessage(''), 3000);
+        } else {
+            setErrorMessage('Failed to delete refill. Please try again.');
+        }
     } catch (error) {
-      console.error('Error deleting refill:', error);
-      setErrorMessage('Failed to delete refill. Please try again.');
+        console.error('Error deleting refill:', error);
+        setErrorMessage('Failed to delete refill. Please try again.');
     }
-  };
+};
 
   // ============================================
   // openEditModal
