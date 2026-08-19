@@ -131,6 +131,8 @@ public class GeofenceController {
         dto.setColor(geofence.getColor());
         dto.setIsActive(geofence.getIsActive());
         dto.setCreatedAt(geofence.getCreatedAt());
+
+        dto.setRouteDistance(geofence.getRouteDistance());
         
         // ✅ Add vehicle count and assigned vehicle IDs
         int vehicleCount = geofenceService.getVehicleCountForGeofence(geofence.getId());

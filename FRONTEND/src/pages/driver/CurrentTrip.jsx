@@ -279,63 +279,73 @@ const CurrentTrip = () => {
   };
 
   // ============================================
-  // HANDLE TRIP UPDATES
-  // ============================================
-  const handleTripUpdate = (data) => {
-    console.log('📡 Trip update received:', data);
+// HANDLE TRIP UPDATES - IMPROVED
+// ============================================
+const handleTripUpdate = (data) => {
+  console.log('📡 Trip update received:', data);
+  
+  const currentVehicle = assignedVehicleRef.current;
+  
+  if (!currentVehicle) {
+    console.log('⚠️ assignedVehicle not loaded yet, storing for later');
+    pendingTripUpdate.current = data;
+    return;
+  }
+  
+  const vehicleId = data.vehicleId || data.vehicle_id || data.vehicle?.id;
+  const isOurVehicle = vehicleId === currentVehicle.id || vehicleId === currentVehicle.vehicleId;
+  
+  if (isOurVehicle) {
+    const status = data.status || data.tripStatus || data.state;
+    const progress = data.progress || data.completionPercentage;
     
-    const currentVehicle = assignedVehicleRef.current;
+    // ✅ Check for completion more thoroughly
+    const isCompleted = 
+        status === 'Completed' || 
+        status === 'completed' || 
+        status === 'Ended' ||
+        status === 'ended' ||
+        progress === '100%' ||
+        progress === 100 ||
+        data.completionReason !== undefined ||
+        data.endedAt !== undefined;
     
-    if (!currentVehicle) {
-      console.log('⚠️ assignedVehicle not loaded yet, storing for later');
-      pendingTripUpdate.current = data;
-      return;
-    }
-    
-    const vehicleId = data.vehicleId || data.vehicle_id || data.vehicle?.id;
-    const isOurVehicle = vehicleId === currentVehicle.id || vehicleId === currentVehicle.vehicleId;
-    
-    if (isOurVehicle) {
-      const status = data.status || data.tripStatus || data.state;
-      const isCompleted = 
-          status === 'Completed' || 
-          status === 'completed' || 
-          data.progress === '100%' ||
-          data.completionReason !== undefined;
-      
-      if (isCompleted) {
-        if (tripEndedRef.current) {
-          console.log('⚠️ Trip already ended, ignoring duplicate completion');
-          return;
-        }
-        
-        console.log('✅ Trip completed! Updating UI...');
-        tripEndedRef.current = true;
-        
-        setIsTripActive(false);
-        setActiveTripId(null);
-        setTripDuration(0);
-        setCurrentSpeed(0);
-        setDistance(0);
-        setFuelUsed(0);
-        setTripProgress('100%');
-        setCurrentLocation('📍 Trip Complete!');
-        setRemainingDistance('0 km');
-        setIsSpeeding(false);
-        
-        setSuccessMessage('✅ Trip completed!');
-        setTimeout(() => setSuccessMessage(''), 5000);
-        
-        loadTrips();
-        syncActiveTrips();
-      } else if (status === 'In Progress' || status === 'active') {
-        tripEndedRef.current = false;
-        setIsTripActive(true);
-        setActiveTripId(data.id || data.tripId);
-        if (data.progress) setTripProgress(data.progress);
+    if (isCompleted) {
+      if (tripEndedRef.current) {
+        console.log('⚠️ Trip already ended, ignoring duplicate completion');
+        return;
       }
+      
+      console.log('✅ Trip completed! Updating UI...');
+      tripEndedRef.current = true;
+      
+      // ✅ Reset all trip states
+      setIsTripActive(false);
+      setActiveTripId(null);
+      setTripDuration(0);
+      setCurrentSpeed(0);
+      setDistance(0);
+      setFuelUsed(0);
+      setTripProgress('100%');
+      setCurrentLocation('📍 Trip Complete!');
+      setRemainingDistance('0 km');
+      setIsSpeeding(false);
+      
+      setSuccessMessage('✅ Trip completed!');
+      setTimeout(() => setSuccessMessage(''), 5000);
+      
+      // ✅ Force refresh
+      loadTrips();
+      syncActiveTrips();
+      
+    } else if (status === 'In Progress' || status === 'active') {
+      tripEndedRef.current = false;
+      setIsTripActive(true);
+      setActiveTripId(data.id || data.tripId);
+      if (data.progress) setTripProgress(data.progress);
     }
-  };
+  }
+};
 
   // ============================================
   // HANDLE TRACKING UPDATES
@@ -1077,51 +1087,70 @@ const CurrentTrip = () => {
   };
 
   // ============================================
-  // END TRIP
-  // ============================================
-  const handleEndTrip = async () => {
-    if (!assignedVehicle) {
-      setErrorMessage('No vehicle assigned');
-      return;
-    }
+// END TRIP - FIXED WITH FULL UI RESET
+// ============================================
+const handleEndTrip = async () => {
+  if (!assignedVehicle) {
+    setErrorMessage('No vehicle assigned');
+    return;
+  }
 
-    try {
-      const tripEndData = {
-        distance: distance,
-        duration: formatTime(tripDuration),
-        fuelUsed: fuelUsed,
-        efficiency: (fuelUsed / (distance || 0.1)) * 100,
-        endOdometer: (parseFloat(assignedVehicle.mileage || 0) + distance)
-      };
+  try {
+    // Show loading state
+    setIsLoading(true);
+    
+    const tripEndData = {
+      distance: distance,
+      duration: formatTime(tripDuration),
+      fuelUsed: fuelUsed,
+      efficiency: (fuelUsed / (distance || 0.1)) * 100,
+      endOdometer: (parseFloat(assignedVehicle.mileage || 0) + distance)
+    };
 
-      const endedTrip = await endTrip(assignedVehicle.id, tripEndData);
+    const endedTrip = await endTrip(assignedVehicle.id, tripEndData);
+    
+    if (endedTrip) {
+      // ✅ Mark trip as ended
+      tripEndedRef.current = true;
       
-      if (endedTrip) {
-        tripEndedRef.current = true;
-        setIsTripActive(false);
-        setTripDuration(0);
-        setCurrentSpeed(0);
-        setDistance(0);
-        setFuelUsed(0);
-        setActiveTripId(null);
-        setTripProgress('100%');
-        setCurrentLocation('📍 Trip Complete!');
-        setRemainingDistance('0 km');
-        setIsSpeeding(false);
-        
-        await syncActiveTrips();
-        await loadTrips();
-        
-        setSuccessMessage('✅ Trip ended successfully!');
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } else {
-        setErrorMessage('❌ Failed to end trip. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error ending trip:', error);
+      // ✅ Reset ALL trip-related states
+      setIsTripActive(false);
+      setActiveTripId(null);
+      setTripDuration(0);
+      setCurrentSpeed(0);
+      setDistance(0);
+      setFuelUsed(0);
+      setTripProgress('100%'); // Show completed
+      setCurrentLocation('📍 Trip Complete!');
+      setRemainingDistance('0 km');
+      setIsSpeeding(false);
+      
+      // ✅ Force refresh all data
+      await syncActiveTrips();
+      await loadTrips();
+      await loadDriverData(); // Refresh vehicle data too
+      
+      // ✅ Clear any pending updates
+      pendingTripUpdate.current = null;
+      pendingTrackingUpdate.current = null;
+      
+      // ✅ Show success message
+      setSuccessMessage('✅ Trip completed successfully!');
+      setTimeout(() => setSuccessMessage(''), 5000);
+      
+      // ✅ Force re-render by triggering a state update
+      setTrips(prev => [...prev]); // This forces a re-render of the trip list
+      
+    } else {
       setErrorMessage('❌ Failed to end trip. Please try again.');
     }
-  };
+  } catch (error) {
+    console.error('Error ending trip:', error);
+    setErrorMessage('❌ Failed to end trip. Please try again.');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // ============================================
   // TRIP LOGIC
@@ -1236,6 +1265,25 @@ const CurrentTrip = () => {
 
     return () => clearInterval(intervalId);
   }, [isWebSocketConnected]);
+
+  // ============================================
+// WATCH FOR TRIP COMPLETION - AUTO RESET
+// ============================================
+useEffect(() => {
+  // If trip ended, make sure UI is reset
+  if (tripEndedRef.current) {
+    setIsTripActive(false);
+    setActiveTripId(null);
+    setTripDuration(0);
+    setCurrentSpeed(0);
+    setDistance(0);
+    setFuelUsed(0);
+    setTripProgress('100%');
+    setCurrentLocation('📍 Trip Complete!');
+    setRemainingDistance('0 km');
+    setIsSpeeding(false);
+  }
+}, [tripEndedRef.current]);
 
   // ============================================
   // RENDER

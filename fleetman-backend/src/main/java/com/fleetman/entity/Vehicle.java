@@ -102,6 +102,9 @@ public class Vehicle {
 
     @Column(name = "last_fuel_report")
     private LocalDateTime lastFuelReport;  // When fuel was last reported
+
+    @Column(name = "fuel_efficiency", precision = 10, scale = 2)
+    private BigDecimal fuelEfficiency;
     
     @Column(name = "engine_size", length = 50)
     private String engineSize;

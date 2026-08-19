@@ -18,6 +18,8 @@ public class GeofenceDTO {
     private String color;
     private Boolean isActive;
     private LocalDateTime createdAt;
+
+    private BigDecimal routeDistance;
     
     // ✅ ADD THESE FIELDS FOR VEHICLE ASSIGNMENTS
     private Integer vehicleCount;

@@ -245,6 +245,19 @@ useEffect(() => {
   };
 }, []);
 
+useEffect(() => {
+  const handleDriverAssignmentChange = (event) => {
+    console.log('🔄 Driver assignment changed, refreshing vehicles...', event.detail);
+    loadData(false);
+  };
+
+  window.addEventListener('driverAssignmentChanged', handleDriverAssignmentChange);
+  
+  return () => {
+    window.removeEventListener('driverAssignmentChanged', handleDriverAssignmentChange);
+  };
+}, []);
+
   // ============================================
   // STATISTICS
   // ============================================
@@ -568,6 +581,73 @@ useEffect(() => {
     setSuccessMessage('');
 
     try {
+
+      // ✅ ============================================
+    // ✅ ADD THIS: Handle driver assignment changes
+    // ✅ ============================================
+    const newDriverId = formData.driverId || null;
+    const oldDriverId = selectedVehicle.driverId || selectedVehicle.driver_id || null;
+    
+    console.log('🔄 Driver assignment change:', {
+      oldDriverId,
+      newDriverId,
+      vehicleId: selectedVehicle.id
+    });
+
+    // If driver changed, update BOTH drivers
+    if (newDriverId !== oldDriverId) {
+      // 1️⃣ Unassign old driver
+      if (oldDriverId) {
+        try {
+          const oldDriver = drivers.find(d => d.id === oldDriverId);
+          if (oldDriver) {
+            const driverData = {
+              name: oldDriver.name,
+              email: oldDriver.email || '',
+              phone: oldDriver.phone || '',
+              licenseNumber: oldDriver.license_number || oldDriver.licenseNumber || '',
+              licenseExpiry: oldDriver.license_expiry || oldDriver.licenseExpiry || '',
+              driverId: oldDriver.driver_id || oldDriver.driverId || '',
+              assignedVehicle: null,
+              safetyScore: oldDriver.safety_score || oldDriver.safetyScore || 100,
+              training: oldDriver.training || '',
+              status: oldDriver.status || 'Active',
+            };
+
+            await driverService.update(oldDriverId, driverData);
+            console.log(`✅ Driver ${oldDriver.name} unassigned from vehicle`);
+          }
+        } catch (err) {
+          console.warn('⚠️ Failed to unassign old driver:', err);
+        }
+      }
+      
+      // 2️⃣ Assign new driver
+      if (newDriverId) {
+        try {
+          const newDriver = drivers.find(d => d.id === newDriverId);
+          if (newDriver) {
+            const driverData = {
+              name: newDriver.name,
+              email: newDriver.email || '',
+              phone: newDriver.phone || '',
+              licenseNumber: newDriver.license_number || newDriver.licenseNumber || '',
+              licenseExpiry: newDriver.license_expiry || newDriver.licenseExpiry || '',
+              driverId: newDriver.driver_id || newDriver.driverId || '',
+              assignedVehicle: { id: selectedVehicle.id },
+              safetyScore: newDriver.safety_score || newDriver.safetyScore || 100,
+              training: newDriver.training || '',
+              status: newDriver.status || 'Active',
+            };
+
+            await driverService.update(newDriverId, driverData);
+            console.log(`✅ Driver ${newDriver.name} assigned to vehicle ${selectedVehicle.reg}`);
+          }
+        } catch (err) {
+          console.warn('⚠️ Failed to assign new driver:', err);
+        }
+      }
+    }
       const updatedVehicle = {
         registration: formData.registration?.trim() || selectedVehicle.registration || selectedVehicle.reg,
         vin: formData.vin || selectedVehicle.vin,

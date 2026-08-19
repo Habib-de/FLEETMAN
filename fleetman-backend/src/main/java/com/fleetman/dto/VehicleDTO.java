@@ -52,6 +52,8 @@ public class VehicleDTO {
     private Double fuelTankCapacity;    // Tank size in litres
     private Double currentFuelLevel;    // Current fuel level (litres or %)
     private LocalDateTime lastFuelReport; // When fuel was last reported
+    private Double fuelEfficiency; 
+
     
     // ============================================
     // ✅ DRIVER ASSIGNMENT

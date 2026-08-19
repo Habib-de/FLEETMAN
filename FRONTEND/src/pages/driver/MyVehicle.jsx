@@ -4,7 +4,7 @@ import {
   Wrench, Radio, Thermometer, Activity, Shield,
   Truck, AlertTriangle, User,
   Clock, Award, Package, AlertCircle, RefreshCw,
-  ClipboardCheck, History, Bell, Calendar, XCircle, ArrowLeft    
+  ClipboardCheck, History, Bell, Calendar, XCircle, ArrowLeft, Lightbulb      
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { 
@@ -61,6 +61,7 @@ const MyVehicle = () => {
   const [checklistHistory, setChecklistHistory] = useState([]);
   const [latestChecklist, setLatestChecklist] = useState(null);
   const [overriddenReturns, setOverriddenReturns] = useState([]);
+  const [checklistItems, setChecklistItems] = useState([]);
   const [tripStats, setTripStats] = useState({
     totalTrips: 0,
     totalDistance: 0,
@@ -331,12 +332,22 @@ const MyVehicle = () => {
   // HELPER FUNCTIONS
   // ============================================
   const calculateFuelLevel = (vehicleData) => {
-    if (vehicleData.fuelLevel !== undefined && vehicleData.fuelLevel !== null) {
-      return vehicleData.fuelLevel;
+  // ✅ FIX: Use currentFuelLevel and fuelTankCapacity first
+  if (vehicleData.currentFuelLevel !== undefined && vehicleData.currentFuelLevel !== null) {
+    if (vehicleData.fuelTankCapacity && vehicleData.fuelTankCapacity > 0) {
+      return Math.round((vehicleData.currentFuelLevel / vehicleData.fuelTankCapacity) * 100);
     }
-    if (vehicleData.fuel_level !== undefined && vehicleData.fuel_level !== null) {
-      return vehicleData.fuel_level;
-    }
+    // If no tank capacity, assume 80L default
+    return Math.round((vehicleData.currentFuelLevel / 80) * 100);
+  }
+  
+  // Fallback to direct fuelLevel fields
+  if (vehicleData.fuelLevel !== undefined && vehicleData.fuelLevel !== null) {
+    return vehicleData.fuelLevel;
+  }
+  if (vehicleData.fuel_level !== undefined && vehicleData.fuel_level !== null) {
+    return vehicleData.fuel_level;
+  }
     const mileage = parseFloat(vehicleData.mileage) || 0;
     if (mileage > 50000) return 45;
     if (mileage > 30000) return 60;
@@ -540,21 +551,50 @@ const MyVehicle = () => {
     }
 
     // 6. Get checklist history for this vehicle
-    let checklistData = [];
-    try {
-      const checklistRes = await checklistService.getHistory(vehicleData.id, tenantId);
-      if (checklistRes?.success && checklistRes?.data) {
-        checklistData = Array.isArray(checklistRes.data) ? checklistRes.data : [checklistRes.data];
-        setChecklistHistory(checklistData.slice(0, 5));
-        if (checklistData.length > 0) {
-          setLatestChecklist(checklistData[0]);
+    // 6. Get checklist history for this vehicle
+let checklistData = [];
+try {
+  const checklistRes = await checklistService.getHistory(vehicleData.id, tenantId);
+  if (checklistRes?.success && checklistRes?.data) {
+    checklistData = Array.isArray(checklistRes.data) ? checklistRes.data : [checklistRes.data];
+    setChecklistHistory(checklistData.slice(0, 5));
+    if (checklistData.length > 0) {
+      const latest = checklistData[0];
+      setLatestChecklist(latest);
+      
+      // ✅ Extract and set full checklist items
+      if (latest && latest.items) {
+        try {
+          const items = typeof latest.items === 'string' ? JSON.parse(latest.items) : latest.items;
+          // Ensure all items have a category
+          const defaultCategories = {
+            'Tire Pressure & Condition': 'Tires',
+            'Engine Oil Level': 'Engine',
+            'Coolant Level': 'Engine',
+            'Brake Fluid': 'Brakes',
+            'Headlights & Signals': 'Lights',
+            'Windscreen & Wipers': 'Exterior',
+            'Emergency Kit': 'Safety',
+            'Driver ID Tag': 'Driver',
+            'Fuel Level': 'Fuel',
+            'Brake Performance': 'Brakes',
+          };
+          const itemsWithCategories = items.map(item => ({
+            ...item,
+            category: item.category || defaultCategories[item.label] || 'Other'
+          }));
+          setChecklistItems(itemsWithCategories);
+        } catch (e) {
+          console.warn('Could not parse checklist items:', e);
+          setChecklistItems([]);
         }
-        console.log('✅ Checklist history found:', checklistData.length);
       }
-    } catch (error) {
-      console.warn('⚠️ Could not fetch checklist history:', error.message);
     }
-
+    console.log('✅ Checklist history found:', checklistData.length);
+  }
+} catch (error) {
+  console.warn('⚠️ Could not fetch checklist history:', error.message);
+}
     // ============================================
     // 7. GET COMPLIANCE ITEMS FOR THIS VEHICLE
     // ============================================
@@ -959,33 +999,118 @@ const MyVehicle = () => {
         </div>
       </div>
 
-      {/* Vehicle Status - From Checklist */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-lg flex items-center gap-2">
-            <Activity size={20} className="text-blue-600" />
-            Vehicle Status
-          </h3>
-          {latestChecklist && (
-            <span className="text-xs text-gray-400">
-              Based on inspection: {formatDate(latestChecklist.createdAt || latestChecklist.created_at)}
-            </span>
-          )}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {statusItems.map((item, i) => (
-            <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <item.icon size={16} className={item.color} />
-                <span className="text-sm">{item.label}</span>
+      {/* ============================================ */}
+{/* FULL CHECKLIST DISPLAY - IMPROVED STYLING */}
+{/* ============================================ */}
+<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+  <div className="flex items-center justify-between mb-4">
+    <h3 className="font-semibold text-lg flex items-center gap-2">
+      <ClipboardCheck size={20} className="text-purple-600" />
+      Vehicle Inspection Status
+    </h3>
+    {latestChecklist && (
+      <span className="text-xs text-gray-400 flex items-center gap-1">
+        <Calendar size={12} />
+        Based on inspection: {formatDate(latestChecklist.createdAt || latestChecklist.created_at)}
+      </span>
+    )}
+  </div>
+  
+  {checklistItems.length > 0 ? (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {checklistItems.map((item, idx) => {
+        const statusColors = {
+          'pass': 'bg-green-100 text-green-700 border-green-200',
+          'fail': 'bg-red-100 text-red-700 border-red-200',
+          'pending': 'bg-yellow-100 text-yellow-700 border-yellow-200',
+        };
+        const statusBadges = {
+          'pass': '✅ Pass',
+          'fail': '❌ Fail',
+          'pending': '⏳ Pending',
+        };
+        const statusColor = statusColors[item.status] || statusColors['pending'];
+        const isDefect = item.defect === true;
+        
+        // Get category icon
+        const getCategoryIcon = (category) => {
+          const icons = {
+            'Tires': <Car size={14} className="text-blue-600" />,
+            'Engine': <Wrench size={14} className="text-orange-600" />,
+            'Brakes': <AlertCircle size={14} className="text-red-600" />,
+            'Lights': <Lightbulb size={14} className="text-yellow-600" />,
+            'Exterior': <Car size={14} className="text-green-600" />,
+            'Safety': <AlertTriangle size={14} className="text-red-600" />,
+            'Driver': <ClipboardCheck size={14} className="text-purple-600" />,
+            'Fuel': <Fuel size={14} className="text-yellow-600" />,
+          };
+          return icons[category] || <ClipboardCheck size={14} className="text-gray-500" />;
+        };
+        
+        return (
+          <div 
+            key={idx} 
+            className={`flex items-center justify-between p-3 rounded-lg border ${
+              isDefect ? 'border-orange-300 bg-orange-50' :
+              item.status === 'pass' ? 'border-green-200 bg-green-50/60' :
+              item.status === 'fail' ? 'border-red-200 bg-red-50/60' :
+              'border-yellow-200 bg-yellow-50/60'
+            } hover:shadow-md transition-shadow`}
+          >
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="flex-shrink-0 p-1.5 bg-white rounded-full shadow-sm">
+                {getCategoryIcon(item.category)}
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusBadge(item.status)}`}>
-                {item.status}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-800 truncate" title={item.label}>
+                  {item.label}
+                </p>
+                {item.category && (
+                  <span className="text-[10px] text-gray-400">{item.category}</span>
+                )}
+                {isDefect && (
+                  <span className="ml-1 text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded-full">
+                    ⚠️ Defect
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+              {item.note && (
+                <span className="text-xs text-gray-400 max-w-[60px] truncate hidden sm:block" title={item.note}>
+                  {item.note}
+                </span>
+              )}
+              <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${statusColor}`}>
+                {statusBadges[item.status] || '⏳ Pending'}
               </span>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : (
+    <div className="text-center py-8 text-gray-500">
+      <ClipboardCheck size={40} className="mx-auto text-gray-300 mb-3" />
+      <p className="text-sm">No inspection records found</p>
+      <p className="text-xs">Complete an inspection in the Checklist tab</p>
+    </div>
+  )}
+  
+  {/* Summary Stats */}
+  {checklistItems.length > 0 && (
+    <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-4 text-xs">
+      <span className="text-gray-500">Summary:</span>
+      <span className="text-green-600">✅ {checklistItems.filter(i => i.status === 'pass').length} Passed</span>
+      <span className="text-red-600">❌ {checklistItems.filter(i => i.status === 'fail').length} Failed</span>
+      <span className="text-yellow-600">⏳ {checklistItems.filter(i => i.status === 'pending').length} Pending</span>
+      <span className="text-orange-600">⚠️ {checklistItems.filter(i => i.defect).length} Defects</span>
+      <span className="text-blue-600 ml-auto font-medium">
+        {Math.round((checklistItems.filter(i => i.status === 'pass').length / checklistItems.length) * 100)}% Complete
+      </span>
+    </div>
+  )}
+</div>
 
       {/* ============================================ */}
 {/* ✅ APPROVED RETURNS SECTION */}

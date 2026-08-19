@@ -16,7 +16,9 @@ import {
   vehicleService, 
   driverService,
   tenantService, 
-  incidentService
+  incidentService,
+  userService,
+  notificationService
 } from '../../services/api';
 
 // Fix for default marker icons in Leaflet
@@ -127,6 +129,185 @@ const Geofencing = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+    // ============================================
+  // HELPER FUNCTIONS FOR VIOLATION HANDLING
+  // ============================================
+
+  // Create incident from geofence violation
+  const createIncidentFromViolation = async (violation) => {
+    try {
+      const tenantId = currentUser?.tenantId;
+      
+      // Check if incident already exists for this violation
+      const existingIncidents = await incidentService.getByTenant(tenantId);
+      const alreadyExists = existingIncidents?.data?.some(
+        inc => inc.geofenceViolationId === violation.id
+      );
+      
+      if (alreadyExists) {
+        console.log('⏳ Incident already exists for this violation');
+        return;
+      }
+      
+      const incidentData = {
+        tenant: { id: tenantId },
+        vehicle: violation.vehicleId ? { id: violation.vehicleId } : null,
+        driver: violation.driverId ? { id: violation.driverId } : null,
+        incidentType: 'Geofence Violation',
+        severity: violation.severity || 'medium',
+        status: 'reported',
+        location: violation.lat && violation.lng ? `${violation.lat}, ${violation.lng}` : 'Unknown',
+        description: `Vehicle ${violation.vehicleRegistration || 'Unknown'} violated geofence "${violation.geofenceName || 'Unknown'}"`,
+        reportedBy: 'FLEETMAN System',
+        geofenceViolationId: violation.id,
+        cost: 0,
+        attachments: '[]'
+      };
+      
+      const response = await incidentService.create(incidentData);
+      
+      if (response?.success) {
+        console.log('✅ Incident created from geofence violation');
+        
+        // Send notification to car owner
+        await sendViolationNotification(violation);
+        
+        // Update vehicle status if severe
+        if (violation.severity === 'high' || violation.severity === 'critical') {
+          await updateVehicleStatusForViolation(violation.vehicleId);
+        }
+        
+        // Dispatch event to refresh incidents page
+        window.dispatchEvent(new CustomEvent('incidentsUpdated'));
+        
+        return response.data;
+      }
+    } catch (error) {
+      console.error('Failed to create incident from violation:', error);
+    }
+  };
+
+  // Send violation notification
+  const sendViolationNotification = async (violation) => {
+    try {
+      const tenantId = currentUser?.tenantId;
+      
+      // Get car owner
+      const usersRes = await userService.getAll();
+      const carOwner = usersRes?.data?.find(u => u.role === 'car_owner');
+      
+      if (!carOwner) {
+        console.warn('No car owner found to notify');
+        return;
+      }
+      
+      const notificationData = {
+        tenant: { id: tenantId },
+        user: { id: carOwner.id },
+        title: '🚨 Geofence Violation Alert',
+        message: `Vehicle ${violation.vehicleRegistration || 'Unknown'} violated geofence "${violation.geofenceName || 'Unknown'}" at ${new Date(violation.timestamp || Date.now()).toLocaleString()}`,
+        type: 'geofence_alert',
+        link: '/incidents'
+      };
+      
+      await notificationService.create(notificationData);
+      console.log('📧 Notification sent to car owner');
+      
+    } catch (error) {
+      console.error('Failed to send notification:', error);
+    }
+  };
+
+  // Update vehicle status for violation
+  const updateVehicleStatusForViolation = async (vehicleId) => {
+    try {
+      if (!vehicleId) return;
+      
+      const fullVehicleRes = await vehicleService.getById(vehicleId);
+      const fullVehicle = fullVehicleRes?.data;
+      
+      if (fullVehicle && fullVehicle.status !== 'Maintenance') {
+        const updatePayload = {
+          tenant: { id: fullVehicle.tenant?.id || fullVehicle.tenantId || currentUser?.tenantId },
+          registration: fullVehicle.registration || fullVehicle.reg || '',
+          make: fullVehicle.make || '',
+          model: fullVehicle.model || '',
+          year: fullVehicle.year || 2024,
+          vin: fullVehicle.vin || '',
+          category: fullVehicle.category || 'Pickup',
+          status: 'Maintenance',
+          mileage: fullVehicle.mileage || 0,
+          owner: fullVehicle.owner || null,
+          costCentre: fullVehicle.costCentre || null,
+          location: fullVehicle.location || null,
+          custodian: fullVehicle.custodian || null,
+          color: fullVehicle.color || null,
+          fuelType: fullVehicle.fuelType || null,
+          engineSize: fullVehicle.engineSize || null,
+          transmission: fullVehicle.transmission || null,
+          acquisitionDate: fullVehicle.acquisitionDate || null,
+          acquisitionCost: fullVehicle.acquisitionCost || null,
+          licenseExpiry: fullVehicle.licenseExpiry || null,
+          roadworthy: fullVehicle.roadworthy || null,
+          insurance: fullVehicle.insurance || null,
+          permit: fullVehicle.permit || null,
+          driverId: fullVehicle.driver?.id || fullVehicle.driverId || null,
+          accessories: fullVehicle.accessories || '[]',
+          maintenanceReason: `Geofence violation detected`
+        };
+
+        await vehicleService.update(vehicleId, updatePayload);
+        console.log(`✅ Vehicle ${vehicleId} status updated to Maintenance due to geofence violation`);
+        
+        window.dispatchEvent(new CustomEvent('vehiclesUpdated'));
+        window.dispatchEvent(new CustomEvent('vehicleStatusChanged', {
+          detail: { 
+            vehicleId: vehicleId,
+            vehicleStatus: 'Maintenance',
+            maintenanceReason: 'Geofence violation detected'
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to update vehicle status:', error);
+    }
+  };
+
+  // ============================================
+  // RESOLVE VIOLATION AND CLOSE INCIDENT
+  // ============================================
+  const resolveViolation = async (violationId) => {
+    try {
+      // Resolve the geofence violation
+      const response = await geofenceService.resolveViolation(violationId);
+      
+      if (response?.success) {
+        // Find and close the associated incident
+        const incidentsRes = await incidentService.getByTenant(currentUser?.tenantId);
+        const incidents = incidentsRes?.data || [];
+        
+        const relatedIncident = incidents.find(
+          inc => inc.geofenceViolationId === violationId
+        );
+        
+        if (relatedIncident) {
+          await incidentService.update(relatedIncident.id, {
+            status: 'resolved',
+            resolvedAt: new Date().toISOString()
+          });
+          console.log('✅ Related incident resolved');
+        }
+        
+        setSuccessMessage('✅ Violation resolved successfully!');
+        await loadData();
+        setTimeout(() => setSuccessMessage(''), 3000);
+      }
+    } catch (error) {
+      console.error('Failed to resolve violation:', error);
+      setErrorMessage('Failed to resolve violation. Please try again.');
+    }
+  };
+
   // ============================================
   // LOAD DATA FROM API
   // ============================================
@@ -162,7 +343,7 @@ const Geofencing = () => {
       setVehicles(vehiclesData);
       console.log(`✅ Loaded ${vehiclesData.length} vehicles`);
 
-      // 3. Load violations
+            // 3. Load violations
       console.log('📡 Fetching geofence violations...');
       let violationsData = [];
       try {
@@ -180,6 +361,16 @@ const Geofencing = () => {
       }
       setViolations(violationsData);
       console.log(`✅ Loaded ${violationsData.length} violations`);
+
+      // ✅ ============================================
+      // ✅ ADD THIS: Process violations and create incidents
+      // ✅ ============================================
+      for (const violation of violationsData) {
+        // Only process unresolved violations
+        if (!violation.resolved) {
+          await createIncidentFromViolation(violation);
+        }
+      }
 
       setLastUpdated(new Date().toLocaleTimeString());
 
@@ -634,14 +825,17 @@ const handleOverrideAsReturn = async (violation) => {
                     }}
                   >
                     <Popup>
-                      <div className="text-sm">
-                        <p className="font-bold">{geofence.name}</p>
-                        <p className="text-gray-600">{getTypeLabel(geofence.type)}</p>
-                        <p className="text-gray-600">Radius: {geofence.radius || 500}m</p>
-                        <p className="text-gray-600">Status: {geofence.isActive ? 'Active' : 'Inactive'}</p>
-                        <p className="text-gray-600">Vehicles: {geofence.vehicleCount || 0}</p>
-                      </div>
-                    </Popup>
+  <div className="text-sm">
+    <p className="font-bold">{geofence.name}</p>
+    <p className="text-gray-600">{getTypeLabel(geofence.type)}</p>
+    <p className="text-gray-600">Radius: {geofence.radius || 500}m</p>
+    {geofence.routeDistance && geofence.type === 'route' && (
+      <p className="text-blue-600 font-medium">Distance: {geofence.routeDistance} km</p>
+    )}
+    <p className="text-gray-600">Status: {geofence.isActive ? 'Active' : 'Inactive'}</p>
+    <p className="text-gray-600">Vehicles: {geofence.vehicleCount || 0}</p>
+  </div>
+</Popup>
                   </SafeCircle>
                 );
               }
@@ -1229,9 +1423,12 @@ const handleOverrideAsReturn = async (violation) => {
                   </div>
                   <p className="text-xs text-gray-500">{getTypeLabel(geofence.type)}</p>
                   <p className="text-xs text-gray-400">Radius: {geofence.radius || 0}m</p>
-                  <p className="text-xs text-gray-400">Points: {
-                    geofence.coordinates ? JSON.parse(geofence.coordinates).length : 0
-                  }</p>
+                  <p className="text-xs text-gray-400">Points: {geofence.coordinates ? JSON.parse(geofence.coordinates).length : 0}</p>
+{geofence.routeDistance && geofence.type === 'route' && (
+  <p className="text-xs text-blue-600 font-medium">
+    Distance: {geofence.routeDistance} km
+  </p>
+)}
                   <p className="text-xs text-gray-400">Vehicles: {geofence.vehicleCount || 0}</p>
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${geofence.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>

@@ -391,60 +391,126 @@ const getStatusIcon = (status) => {
   };
 
   const handleAddJob = async () => {
-    setIsLoading(true);
-    setErrorMessage('');
-    setSuccessMessage('');
+  setIsLoading(true);
+  setErrorMessage('');
+  setSuccessMessage('');
 
-    if (!formData.vehicle_id) {
-      setErrorMessage('Vehicle is required');
-      setIsLoading(false);
-      return;
-    }
-    if (!formData.type) {
-      setErrorMessage('Service type is required');
-      setIsLoading(false);
-      return;
-    }
+  if (!formData.vehicle_id) {
+    setErrorMessage('Vehicle is required');
+    setIsLoading(false);
+    return;
+  }
+  if (!formData.type) {
+    setErrorMessage('Service type is required');
+    setIsLoading(false);
+    return;
+  }
 
-    try {
-      const jobData = {
-        tenant: { id: tenantId },
-        vehicle: formData.vehicle_id,
-        driver: formData.driver_id ? { id: formData.driver_id } : null,
-        type: formData.type,
-        status: formData.status || 'logged',
-        priority: formData.priority || 'medium',
-        description: formData.description || '',
-        reportedBy: formData.reported_by || currentUser?.name || 'System',
-        scheduledDate: formData.scheduled_date || null,
-        completedDate: null,
-        cost: parseFloat(formData.cost) || 0,
-        mechanic: formData.mechanic || 'Pending',
-        partsUsed: JSON.stringify(formData.parts_used || []),
-        estimatedHours: parseFloat(formData.estimated_hours) || 0,
-        actualHours: 0,
-        serviceType: formData.service_type || 'corrective'
-      };
+  try {
+    // STEP 1: Create the maintenance job
+    const jobData = {
+      tenant: { id: tenantId },
+      vehicle: { id: formData.vehicle_id },  // ✅ FIXED
+      driver: formData.driver_id ? { id: formData.driver_id } : null,
+      type: formData.type,
+      status: formData.status || 'logged',
+      priority: formData.priority || 'medium',
+      description: formData.description || '',
+      reportedBy: formData.reported_by || currentUser?.name || 'System',
+      scheduledDate: formData.scheduled_date || null,
+      completedDate: null,
+      cost: parseFloat(formData.cost) || 0,
+      mechanic: formData.mechanic || 'Pending',
+      partsUsed: JSON.stringify(formData.parts_used || []),
+      estimatedHours: parseFloat(formData.estimated_hours) || 0,
+      actualHours: 0,
+      serviceType: formData.service_type || 'corrective'
+    };
 
-      console.log('📤 Creating maintenance job:', jobData);
-      const response = await maintenanceService.create(jobData);
-      
-      if (response?.success) {
-        setSuccessMessage('✅ Maintenance job created successfully!');
-        setShowNewJobForm(false);
-        resetForm();
-        await loadData();
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } else {
-        setErrorMessage('Failed to create job. Please try again.');
+    console.log('📤 Creating maintenance job:', jobData);
+    const response = await maintenanceService.create(jobData);
+    
+    if (response?.success) {
+      // ============================================
+      // ✅ STEP 2: Update vehicle status to "Maintenance"
+      // ============================================
+      try {
+        const vehicleId = formData.vehicle_id;
+        console.log('🔧 Updating vehicle status to Maintenance for ID:', vehicleId);
+        
+        // Get full vehicle data
+        const fullVehicleRes = await vehicleService.getById(vehicleId);
+        const fullVehicle = fullVehicleRes?.data;
+        
+        if (fullVehicle) {
+          const updatePayload = {
+            tenant: { id: fullVehicle.tenant?.id || fullVehicle.tenantId || tenantId },
+            registration: fullVehicle.registration || fullVehicle.reg || '',
+            make: fullVehicle.make || '',
+            model: fullVehicle.model || '',
+            year: fullVehicle.year || 2024,
+            vin: fullVehicle.vin || '',
+            category: fullVehicle.category || 'Pickup',
+            status: 'Maintenance',  // ✅ Set to Maintenance
+            mileage: fullVehicle.mileage || 0,
+            owner: fullVehicle.owner || null,
+            costCentre: fullVehicle.costCentre || null,
+            location: fullVehicle.location || null,
+            custodian: fullVehicle.custodian || null,
+            color: fullVehicle.color || null,
+            fuelType: fullVehicle.fuelType || null,
+            engineSize: fullVehicle.engineSize || null,
+            transmission: fullVehicle.transmission || null,
+            acquisitionDate: fullVehicle.acquisitionDate || null,
+            acquisitionCost: fullVehicle.acquisitionCost || null,
+            licenseExpiry: fullVehicle.licenseExpiry || null,
+            roadworthy: fullVehicle.roadworthy || null,
+            insurance: fullVehicle.insurance || null,
+            permit: fullVehicle.permit || null,
+            driverId: fullVehicle.driver?.id || fullVehicle.driverId || null,
+            accessories: fullVehicle.accessories || '[]',
+            maintenanceReason: `In maintenance: ${formData.type}`  // ✅ Add reason
+          };
+
+          console.log('📤 Updating vehicle to Maintenance:', updatePayload);
+          const updateResponse = await vehicleService.update(vehicleId, updatePayload);
+          
+          if (updateResponse?.success) {
+            console.log(`✅ Vehicle ${fullVehicle.registration || vehicleId} status updated to Maintenance`);
+            
+            // Dispatch events so other pages update
+            window.dispatchEvent(new CustomEvent('vehiclesUpdated'));
+            window.dispatchEvent(new CustomEvent('vehicleStatusChanged', {
+              detail: { 
+                vehicleId: vehicleId,
+                vehicleStatus: 'Maintenance',
+                maintenanceReason: `In maintenance: ${formData.type}`
+              }
+            }));
+            
+            setSuccessMessage(`✅ Maintenance job created! Vehicle ${fullVehicle.registration || vehicleId} is now in Maintenance.`);
+          }
+        }
+      } catch (vehicleError) {
+        console.error('❌ Could not update vehicle status:', vehicleError);
+        // Still show success for the job, but warn about vehicle status
+        setSuccessMessage('✅ Maintenance job created! (Vehicle status update failed)');
       }
-    } catch (error) {
-      console.error('Error creating maintenance job:', error);
+
+      setShowNewJobForm(false);
+      resetForm();
+      await loadData();
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } else {
       setErrorMessage('Failed to create job. Please try again.');
-    } finally {
-      setIsLoading(false);
     }
-  };
+  } catch (error) {
+    console.error('Error creating maintenance job:', error);
+    setErrorMessage('Failed to create job. Please try again.');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleEditJob = async () => {
     if (!selectedJob) return;
@@ -515,7 +581,10 @@ const getStatusIcon = (status) => {
     }
   };
 
-  const handleUpdateStatus = async (jobId, newStatus) => {
+  // ============================================
+// FIXED: handleUpdateStatus - Updates both maintenance job AND vehicle status
+// ============================================
+const handleUpdateStatus = async (jobId, newStatus) => {
   console.log('🔧 ===== HANDLE UPDATE STATUS START =====');
   console.log('🔧 Job ID:', jobId);
   console.log('🔧 New Status:', newStatus);
@@ -524,11 +593,13 @@ const getStatusIcon = (status) => {
     const job = maintenanceJobs.find(j => j.id === jobId);
     if (!job) {
       console.error('❌ Job not found:', jobId);
+      setErrorMessage('Job not found');
       return;
     }
 
     console.log('🔧 Job found:', job);
 
+    // Parse parts used if needed
     let partsUsed = job.partsUsed || [];
     if (typeof partsUsed === 'string') {
       try {
@@ -538,16 +609,18 @@ const getStatusIcon = (status) => {
       }
     }
 
-    // ✅ FIX: Get vehicle ID from ALL possible fields
+    // Get vehicle ID from ALL possible fields
     const vehicleId = job.vehicle?.id || job.vehicle_id || job.vehicleId || '';
     console.log('🔧 Vehicle ID found:', vehicleId);
 
     if (!vehicleId) {
-      console.error('❌ No vehicle ID found in job!');
       setErrorMessage('This job has no vehicle assigned. Please edit the job and add a vehicle.');
       return;
     }
 
+    // ============================================
+    // STEP 1: Update the maintenance job
+    // ============================================
     const payload = {
       vehicle: { id: vehicleId },
       driver: job.driver?.id || job.driver_id ? { id: job.driver?.id || job.driver_id } : null,
@@ -555,11 +628,11 @@ const getStatusIcon = (status) => {
       status: newStatus,
       priority: job.priority,
       description: job.description,
-      reportedBy: job.reportedBy || job.reported_by,
+      reportedBy: job.reportedBy || job.reported_by || 'System',
       scheduledDate: job.scheduledDate || job.scheduled_date,
-      completedDate: newStatus === 'closed' || newStatus === 'completed' ? new Date().toISOString() : (job.completedDate || job.completed_date),
+      completedDate: newStatus === 'closed' || newStatus === 'completed' ? new Date().toISOString() : null,
       cost: parseFloat(job.cost) || 0,
-      mechanic: job.mechanic,
+      mechanic: job.mechanic || 'Pending',
       partsUsed: JSON.stringify(partsUsed),
       estimatedHours: parseFloat(job.estimatedHours || job.estimated_hours) || 0,
       actualHours: parseFloat(job.actualHours || job.actual_hours) || 0,
@@ -568,7 +641,6 @@ const getStatusIcon = (status) => {
 
     console.log('📤 Sending maintenance update payload:', JSON.stringify(payload, null, 2));
     
-    // Step 1: Update maintenance job
     const response = await maintenanceService.update(jobId, payload);
     console.log('📥 Maintenance update response:', response);
 
@@ -579,35 +651,32 @@ const getStatusIcon = (status) => {
     }
 
     console.log('✅ Maintenance job updated successfully');
-    
+
     // ============================================
-    // Step 2: UPDATE VEHICLE STATUS
+    // STEP 2: UPDATE VEHICLE STATUS (THE FIX)
     // ============================================
-    console.log('🔧 ===== UPDATING VEHICLE STATUS =====');
-    console.log('🔧 Vehicle ID:', vehicleId);
-    
     try {
-      // Get current vehicle data
-      console.log('📡 Fetching vehicle data for ID:', vehicleId);
-      const vehicleRes = await vehicleService.getById(vehicleId);
-      console.log('📥 Vehicle response:', vehicleRes);
+      // Get the FULL vehicle data first
+      console.log('📡 Fetching full vehicle data for ID:', vehicleId);
+      const fullVehicleRes = await vehicleService.getById(vehicleId);
+      console.log('📥 Full vehicle response:', fullVehicleRes);
       
-      const vehicle = vehicleRes?.data;
+      const fullVehicle = fullVehicleRes?.data;
       
-      if (!vehicle) {
+      if (!fullVehicle) {
         console.error('❌ Vehicle not found:', vehicleId);
         setErrorMessage('Vehicle not found. Please try again.');
         return;
       }
 
-      console.log('✅ Vehicle found:', vehicle);
-      console.log('📊 Current vehicle status:', vehicle.status);
+      console.log('✅ Full vehicle found:', fullVehicle);
+      console.log('📊 Current vehicle status:', fullVehicle.status);
 
       // Determine new vehicle status based on maintenance status
-      let vehicleStatus = 'Active'; // Default
-      
       const maintenanceStatuses = ['logged', 'approved', 'booked', 'in_progress', 'inProgress', 'quality_check', 'qualityCheck'];
       const completedStatuses = ['closed', 'completed'];
+      
+      let vehicleStatus = 'Active'; // Default
       
       if (maintenanceStatuses.includes(newStatus)) {
         vehicleStatus = 'Maintenance';
@@ -617,35 +686,41 @@ const getStatusIcon = (status) => {
         vehicleStatus = 'Active';
       }
       
-      console.log(`📊 Vehicle ${vehicleId} status: ${vehicle.status} → ${vehicleStatus}`);
+      console.log(`📊 Vehicle ${vehicleId} status: ${fullVehicle.status} → ${vehicleStatus}`);
 
-      // Build complete update payload
+      // ✅ THE FIX: Build complete update payload with ALL fields INCLUDING tenant
       const updatePayload = {
-        tenant: { id: vehicle.tenant?.id || vehicle.tenantId || tenantId },
-        registration: vehicle.registration || '',
-        make: vehicle.make || '',
-        model: vehicle.model || '',
-        year: vehicle.year || 2024,
-        vin: vehicle.vin || '',
-        category: vehicle.category || 'Pickup',
-        status: vehicleStatus,
-        mileage: vehicle.mileage || 0,
-        owner: vehicle.owner || null,
-        costCentre: vehicle.costCentre || null,
-        location: vehicle.location || null,
-        custodian: vehicle.custodian || null,
-        color: vehicle.color || null,
-        fuelType: vehicle.fuelType || null,
-        engineSize: vehicle.engineSize || null,
-        transmission: vehicle.transmission || null,
-        acquisitionDate: vehicle.acquisitionDate || null,
-        acquisitionCost: vehicle.acquisitionCost || null,
-        licenseExpiry: vehicle.licenseExpiry || null,
-        roadworthy: vehicle.roadworthy || null,
-        insurance: vehicle.insurance || null,
-        permit: vehicle.permit || null,
-        driverId: vehicle.driverId || null,
-        accessories: vehicle.accessories || '[]'
+        // ✅ CRITICAL: tenant is required!
+        tenant: { id: fullVehicle.tenant?.id || fullVehicle.tenantId || tenantId },
+        
+        registration: fullVehicle.registration || fullVehicle.reg || '',
+        make: fullVehicle.make || '',
+        model: fullVehicle.model || '',
+        year: fullVehicle.year || 2024,
+        vin: fullVehicle.vin || '',
+        category: fullVehicle.category || 'Pickup',
+        status: vehicleStatus, // ✅ This is what changes
+        mileage: fullVehicle.mileage || 0,
+        owner: fullVehicle.owner || null,
+        costCentre: fullVehicle.costCentre || null,
+        location: fullVehicle.location || null,
+        custodian: fullVehicle.custodian || null,
+        color: fullVehicle.color || null,
+        fuelType: fullVehicle.fuelType || null,
+        engineSize: fullVehicle.engineSize || null,
+        transmission: fullVehicle.transmission || null,
+        acquisitionDate: fullVehicle.acquisitionDate || null,
+        acquisitionCost: fullVehicle.acquisitionCost || null,
+        licenseExpiry: fullVehicle.licenseExpiry || null,
+        roadworthy: fullVehicle.roadworthy || null,
+        insurance: fullVehicle.insurance || null,
+        permit: fullVehicle.permit || null,
+        driverId: fullVehicle.driver?.id || fullVehicle.driverId || null,
+        accessories: fullVehicle.accessories || '[]',
+        // ✅ Add maintenance reason if going into maintenance
+        maintenanceReason: vehicleStatus === 'Maintenance' 
+          ? `In maintenance: ${job.type}` 
+          : null
       };
 
       console.log('📤 Sending vehicle update payload:', JSON.stringify(updatePayload, null, 2));
@@ -656,13 +731,14 @@ const getStatusIcon = (status) => {
       if (updateResponse?.success) {
         console.log(`✅ Vehicle ${vehicleId} status updated to ${vehicleStatus}`);
         
-        // ✅ DISPATCH EVENTS
+        // ✅ DISPATCH EVENTS so other pages update
         window.dispatchEvent(new CustomEvent('vehiclesUpdated'));
         window.dispatchEvent(new CustomEvent('vehicleStatusChanged', {
           detail: { 
             vehicleId: vehicleId,
             vehicleStatus: vehicleStatus,
-            maintenanceStatus: newStatus
+            maintenanceStatus: newStatus,
+            maintenanceReason: vehicleStatus === 'Maintenance' ? `In maintenance: ${job.type}` : null
           }
         }));
         
@@ -674,9 +750,10 @@ const getStatusIcon = (status) => {
               status: 'completed'
             }
           }));
+          setSuccessMessage(`✅ Vehicle ${fullVehicle.registration || vehicleId} is now ACTIVE and ready for trips!`);
+        } else {
+          setSuccessMessage(`✅ Vehicle ${fullVehicle.registration || vehicleId} status updated to ${vehicleStatus}`);
         }
-        
-        setSuccessMessage(`✅ Vehicle ${vehicle.registration || vehicleId} status updated to ${vehicleStatus}`);
       } else {
         console.error('❌ Vehicle update failed:', updateResponse);
         setErrorMessage('Failed to update vehicle status: ' + (updateResponse?.message || 'Unknown error'));
@@ -688,7 +765,7 @@ const getStatusIcon = (status) => {
 
     // Refresh data
     await loadData();
-    setTimeout(() => setSuccessMessage(''), 3000);
+    setTimeout(() => setSuccessMessage(''), 5000);
     
   } catch (error) {
     console.error('❌ Error in handleUpdateStatus:', error);

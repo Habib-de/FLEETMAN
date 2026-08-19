@@ -274,6 +274,29 @@ useEffect(() => {
   };
 }, []);
 
+// ============================================
+// LISTEN FOR VEHICLE UPDATES AND ASSIGNMENT CHANGES
+// ============================================
+useEffect(() => {
+  const handleVehiclesUpdated = () => {
+    console.log('🔄 Vehicles updated, refreshing drivers...');
+    loadData(false);
+  };
+
+  const handleDriverAssignmentChange = (event) => {
+    console.log('🔄 Driver assignment changed, refreshing drivers...', event.detail);
+    loadData(false);
+  };
+
+  window.addEventListener('vehiclesUpdated', handleVehiclesUpdated);
+  window.addEventListener('driverAssignmentChanged', handleDriverAssignmentChange);
+
+  return () => {
+    window.removeEventListener('vehiclesUpdated', handleVehiclesUpdated);
+    window.removeEventListener('driverAssignmentChanged', handleDriverAssignmentChange);
+  };
+}, []);
+
   // ============================================
   // STATISTICS
   // ============================================
@@ -502,6 +525,65 @@ useEffect(() => {
 
     try {
       const vehicleId = formData.assignedVehicleId || null;
+
+      // ✅ ============================================
+    // ✅ ADD THIS: Handle vehicle assignment changes
+    // ✅ ============================================
+    const newVehicleId = formData.assignedVehicleId || null;
+    const oldVehicleId = selectedDriver.assignedVehicleId || selectedDriver.assigned_vehicle || null;
+    
+    console.log('🔄 Vehicle assignment change:', {
+      oldVehicleId,
+      newVehicleId,
+      driverId: selectedDriver.id
+    });
+
+    // If vehicle changed, update BOTH vehicles
+    if (newVehicleId !== oldVehicleId) {
+      // 1️⃣ Unassign old vehicle
+      if (oldVehicleId) {
+        try {
+          const oldVehicleRes = await vehicleService.getById(oldVehicleId);
+          const oldVehicle = oldVehicleRes?.data;
+          if (oldVehicle) {
+            const vehicleData = {
+              ...oldVehicle,
+              driver: null
+            };
+            delete vehicleData.id;
+            delete vehicleData.createdAt;
+            delete vehicleData.updatedAt;
+            
+            await vehicleService.update(oldVehicleId, vehicleData);
+            console.log(`✅ Vehicle ${oldVehicleId} unassigned from driver`);
+          }
+        } catch (err) {
+          console.warn('⚠️ Failed to unassign old vehicle:', err);
+        }
+      }
+      
+      // 2️⃣ Assign new vehicle
+      if (newVehicleId) {
+        try {
+          const newVehicleRes = await vehicleService.getById(newVehicleId);
+          const newVehicle = newVehicleRes?.data;
+          if (newVehicle) {
+            const vehicleData = {
+              ...newVehicle,
+              driver: { id: selectedDriver.id }
+            };
+            delete vehicleData.id;
+            delete vehicleData.createdAt;
+            delete vehicleData.updatedAt;
+            
+            await vehicleService.update(newVehicleId, vehicleData);
+            console.log(`✅ Vehicle ${newVehicleId} assigned to driver ${selectedDriver.name}`);
+          }
+        } catch (err) {
+          console.warn('⚠️ Failed to assign new vehicle:', err);
+        }
+      }
+    }
       
       const updatedDriver = {
         name: formData.name.trim(),
@@ -520,6 +602,16 @@ useEffect(() => {
       
       if (response.success) {
         setSuccessMessage(`✅ Driver ${formData.name} updated successfully!`);
+                // ✅ Dispatch events
+        window.dispatchEvent(new CustomEvent('driversUpdated'));
+        window.dispatchEvent(new CustomEvent('vehiclesUpdated'));
+        window.dispatchEvent(new CustomEvent('driverAssignmentChanged', {
+          detail: {
+            driverId: selectedDriver.id,
+            vehicleId: newVehicleId,
+            assigned: !!newVehicleId
+          }
+        }));
         setShowEditDriverModal(false);
         setSelectedDriver(null);
         resetForm();

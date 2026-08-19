@@ -98,6 +98,7 @@ public class VehicleService {
         vehicle.setFuelTankCapacity(vehicleDetails.getFuelTankCapacity());
         vehicle.setCurrentFuelLevel(vehicleDetails.getCurrentFuelLevel());
         vehicle.setLastFuelReport(vehicleDetails.getLastFuelReport());
+        vehicle.setFuelEfficiency(vehicleDetails.getFuelEfficiency()); 
         vehicle.setEngineSize(vehicleDetails.getEngineSize());
         vehicle.setTransmission(vehicleDetails.getTransmission());
         vehicle.setAcquisitionDate(vehicleDetails.getAcquisitionDate());

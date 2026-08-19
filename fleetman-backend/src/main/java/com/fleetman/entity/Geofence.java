@@ -43,6 +43,9 @@ public class Geofence {
     
     @Column(name = "coordinates", columnDefinition = "JSON")
     private String coordinates;
+
+    @Column(name = "route_distance", precision = 10, scale = 2)
+    private BigDecimal routeDistance;  
     
     @Column(name = "color", length = 7)
     private String color = "#2563EB";

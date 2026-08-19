@@ -1051,7 +1051,7 @@ const Tracking = () => {
           lng: newLng,
           speed: effectiveSpeed,
           heading: data.heading || v.heading,
-          fuel: data.fuelLevel ? Math.round(parseFloat(data.fuelLevel)) : v.fuel,
+           fuel: v.fuel,
           engineTemp: data.engineTemp ? Math.round(parseFloat(data.engineTemp)) : v.engineTemp,
           lastUpdate: data.timestamp ? new Date(data.timestamp) : new Date(),
           status: effectiveStatus,
@@ -1394,7 +1394,20 @@ const loadData = async () => {
         lng = track.lng ? parseFloat(track.lng) : null;
         speed = track.speed ? Math.round(parseFloat(track.speed)) : 0;
         heading = track.heading || 0;
-        fuel = track.fuelLevel ? Math.round(parseFloat(track.fuelLevel)) : null;
+        // ✅ FIX: Calculate fuel from vehicle data FIRST
+const vehicleFuelLevel = parseFloat(v.currentFuelLevel) || 0;
+const vehicleFuelTankCapacity = parseFloat(v.fuelTankCapacity) || 80;
+
+// Use vehicle data for fuel (same as Vehicles page)
+if (vehicleFuelLevel > 0 && vehicleFuelTankCapacity > 0) {
+    fuel = Math.round((vehicleFuelLevel / vehicleFuelTankCapacity) * 100);
+    // Clamp between 0-100
+    fuel = Math.max(0, Math.min(100, fuel));
+} else if (track && track.fuelLevel) {
+    fuel = Math.round(parseFloat(track.fuelLevel));
+} else {
+    fuel = 50 + Math.random() * 40; // Default fallback
+}
         engineTemp = track.engineTemp ? Math.round(parseFloat(track.engineTemp)) : null;
         lastUpdate = track.timestamp ? new Date(track.timestamp) : new Date();
         status = (activeTrip && speed > 3) ? 'moving' : 'idle';
@@ -1435,6 +1448,10 @@ const loadData = async () => {
         driverLicense: assignedDriver?.licenseNumber || null,
         lastUpdate: lastUpdate,
         fuel: fuel,
+        currentFuelLevel: v.currentFuelLevel || 0,
+        fuelTankCapacity: v.fuelTankCapacity || 80,
+        currentFuelLevel: v.currentFuelLevel || 0,
+        fuelTankCapacity: v.fuelTankCapacity || 80,
         odometer: v.mileage || '0 km',
         engineTemp: engineTemp,
         make: v.make || 'Unknown',
@@ -1624,6 +1641,49 @@ const loadData = async () => {
 
     return () => clearInterval(moveInterval);
   }, [vehicles.length, isWebSocketConnected]);
+
+    // ============================================
+  // LISTEN FOR FUEL LEVEL UPDATES
+  // ============================================
+  useEffect(() => {
+    const handleFuelUpdate = (event) => {
+      console.log('⛽ Fuel level updated, refreshing tracking...', event.detail);
+      loadData();
+    };
+
+    const handleVehicleFuelUpdated = (event) => {
+      console.log('⛽ Vehicle fuel updated, updating tracking directly...', event.detail);
+      if (event.detail && event.detail.vehicleId) {
+        setVehicles(prev => prev.map(v => {
+          if (v.id === event.detail.vehicleId) {
+            const fuelPercentage = event.detail.fuelLevel || 
+              (event.detail.fuelLitres && v.fuelTankCapacity ? 
+                Math.round((event.detail.fuelLitres / v.fuelTankCapacity) * 100) : 
+                v.fuel);
+            return {
+              ...v,
+              fuel: fuelPercentage,
+              currentFuelLevel: event.detail.fuelLitres || v.currentFuelLevel
+            };
+          }
+          return v;
+        }));
+      }
+      loadData();
+    };
+
+    window.addEventListener('fuelRefillAdded', handleFuelUpdate);
+    window.addEventListener('fuelRefillUpdated', handleFuelUpdate);
+    window.addEventListener('fuelRefillDeleted', handleFuelUpdate);
+    window.addEventListener('vehicleFuelUpdated', handleVehicleFuelUpdated);
+
+    return () => {
+      window.removeEventListener('fuelRefillAdded', handleFuelUpdate);
+      window.removeEventListener('fuelRefillUpdated', handleFuelUpdate);
+      window.removeEventListener('fuelRefillDeleted', handleFuelUpdate);
+      window.removeEventListener('vehicleFuelUpdated', handleVehicleFuelUpdated);
+    };
+  }, []);
 
   // ============================================
   // HANDLE FUNCTIONS

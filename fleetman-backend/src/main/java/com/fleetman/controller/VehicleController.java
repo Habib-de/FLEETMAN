@@ -121,6 +121,8 @@ public class VehicleController {
         dto.setCurrentFuelLevel(vehicle.getCurrentFuelLevel() != null ? 
         vehicle.getCurrentFuelLevel().doubleValue() : null);
         dto.setLastFuelReport(vehicle.getLastFuelReport());
+        dto.setFuelEfficiency(vehicle.getFuelEfficiency() != null ?   // ✅ ADD THIS LINE
+            vehicle.getFuelEfficiency().doubleValue() : null);
         dto.setDriverId(vehicle.getDriver() != null ? vehicle.getDriver().getId() : null);
         dto.setDriverName(vehicle.getDriver() != null ? vehicle.getDriver().getName() : null);
         
