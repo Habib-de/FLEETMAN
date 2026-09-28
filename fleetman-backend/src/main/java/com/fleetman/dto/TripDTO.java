@@ -25,4 +25,10 @@ public class TripDTO {
     private BigDecimal endOdometer;
     private String purpose;
     private LocalDateTime createdAt;
+
+    private String geofenceId;
+    private String geofenceName;
+    private String priority;
+    private String notes;
+    private LocalDateTime updatedAt;
 }

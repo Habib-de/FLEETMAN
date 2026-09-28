@@ -177,9 +177,9 @@ const Merchants = () => {
 
   const getStatusLabel = (status) => {
     const labels = {
-      'pending': '⏳ Pending',
-      'approved': '✅ Approved',
-      'rejected': '❌ Rejected'
+      'pending': 'Pending',
+      'approved': 'Approved',
+      'rejected': 'Rejected'
     };
     return labels[status] || status;
   };
@@ -782,7 +782,7 @@ const Merchants = () => {
               </div>
               <div className="bg-gray-50 p-3 rounded-lg text-center">
                 <p className="text-xs text-gray-500">Avg Job Cost</p>
-                <p className="text-lg font-bold text-purple-600">LSL {(selectedMerchant.avgJobCost || 0).toLocaleString()}</p>
+                <p className="text-lg font-bold text-purple-600">KSH {(selectedMerchant.avgJobCost || 0).toLocaleString()}</p>
               </div>
               <div className="bg-gray-50 p-3 rounded-lg text-center">
                 <p className="text-xs text-gray-500">Contact</p>
@@ -841,24 +841,27 @@ const Merchants = () => {
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-200">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-4 border-t border-gray-200">
               <button 
                 onClick={() => { openEditModal(selectedMerchant); setSelectedMerchant(null); }}
-                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center justify-center gap-2"
+                className="bg-blue-600 text-white px-1.5 sm:px-4 py-2 rounded-lg text-[10px] sm:text-sm hover:bg-blue-700 flex items-center justify-center gap-1 sm:gap-2"
               >
-                <Edit size={16} /> Edit Merchant
+                <Edit size={12} className="sm:w-4 sm:h-4 flex-shrink-0" /> 
+                <span className="truncate">Edit Merchant</span>
               </button>
               <button 
                 onClick={() => viewMerchantJobs(selectedMerchant)}
-                className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 flex items-center justify-center gap-2"
+                className="bg-green-600 text-white px-1.5 sm:px-4 py-2 rounded-lg text-[10px] sm:text-sm hover:bg-green-700 flex items-center justify-center gap-1 sm:gap-2"
               >
-                <Wrench size={16} /> View Jobs
+                <Wrench size={12} className="sm:w-4 sm:h-4 flex-shrink-0" /> 
+                <span className="truncate">View Jobs</span>
               </button>
               <button 
                 onClick={() => { openDeleteConfirm(selectedMerchant); setSelectedMerchant(null); }}
-                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 flex items-center justify-center gap-2"
+                className="bg-red-600 text-white px-1.5 sm:px-4 py-2 rounded-lg text-[10px] sm:text-sm hover:bg-red-700 flex items-center justify-center gap-1 sm:gap-2"
               >
-                <Trash2 size={16} /> Remove
+                <Trash2 size={12} className="sm:w-4 sm:h-4 flex-shrink-0" /> 
+                <span className="truncate">Remove</span>
               </button>
             </div>
           </div>
@@ -904,8 +907,14 @@ const Merchants = () => {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-medium">LSL {(job.cost || 0).toLocaleString()}</p>
-                      <p className="text-xs text-gray-400">{job.date ? new Date(job.date).toLocaleDateString() : 'N/A'}</p>
+                      <p className="text-sm font-medium">KSH {(job.cost || 0).toLocaleString()}</p>
+                      <p className="text-xs text-gray-400">
+  {job.completedDate || job.completed_date
+    ? new Date(job.completedDate || job.completed_date).toLocaleDateString()
+    : job.scheduledDate || job.scheduled_date
+      ? new Date(job.scheduledDate || job.scheduled_date).toLocaleDateString()
+      : 'N/A'}
+</p>
                     </div>
                   </div>
                 ))}
@@ -1142,7 +1151,7 @@ const Merchants = () => {
         <div className="bg-white p-4 rounded-lg border border-gray-200">
           <p className="text-xs text-gray-500">Total Jobs</p>
           <p className="text-2xl font-bold text-blue-600">{stats.totalJobs}</p>
-          <p className="text-xs text-gray-400">Total Cost: LSL {stats.totalCost.toLocaleString()}</p>
+          <p className="text-xs text-gray-400">Total Cost: KSH {stats.totalCost.toLocaleString()}</p>
         </div>
       </div>
 

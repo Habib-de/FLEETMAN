@@ -22,6 +22,8 @@ public interface TripRepository extends JpaRepository<Trip, String> {
     List<Trip> findByTenantIdAndStatus(String tenantId, String status);
     
     List<Trip> findByVehicleIdAndStatus(String vehicleId, String status);
+
+    List<Trip> findByDriverIdAndStatus(String driverId, String status);
     
     List<Trip> findByStartTimeBetween(LocalDateTime start, LocalDateTime end);
     

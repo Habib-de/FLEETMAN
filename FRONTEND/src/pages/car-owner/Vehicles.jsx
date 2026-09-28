@@ -14,8 +14,10 @@ import { useAuth } from '../../context/AuthContext';
 import { 
   vehicleService, 
   driverService, 
-  tenantService
+  tenantService,
+  maintenanceService
 } from '../../services/api';
+import { eventBus, EVENTS } from '../../services/eventBus';
 
 // ✅ FIX: Rename the prop to avoid conflict with state variable
 const Vehicles = ({ setActiveTab: setActiveTabProp }) => {
@@ -676,9 +678,91 @@ useEffect(() => {
         accessories: JSON.stringify(formData.accessories || []),
       };
 
-      const response = await vehicleService.update(selectedVehicle.id, updatedVehicle);
+            const response = await vehicleService.update(selectedVehicle.id, updatedVehicle);
       if (response.success) {
-        setSuccessMessage('Vehicle updated successfully!');
+        // ✅ ANNOUNCE: Vehicle changed → notify all other pages
+        // (must happen BEFORE setSelectedVehicle(null))
+        eventBus.emit(EVENTS.VEHICLE_UPDATED, {
+          vehicleId: selectedVehicle.id,
+          registration: selectedVehicle.reg || selectedVehicle.registration,
+        });
+
+        // ✅ ANNOUNCE: If status changed → notify even more specifically
+        const oldStatus = selectedVehicle.status;
+        const newStatus = updatedVehicle.status;
+        
+        if (oldStatus !== newStatus) {
+          console.log(`🔔 Vehicle status changed: ${oldStatus} → ${newStatus}`);
+          eventBus.emit(EVENTS.VEHICLE_STATUS_CHANGED, {
+            vehicleId: selectedVehicle.id,
+            registration: selectedVehicle.reg || selectedVehicle.registration,
+            previousStatus: oldStatus,
+            newStatus: newStatus,
+          });
+        }
+
+        // ✅ NEW: If vehicle was just decommissioned, cancel its open maintenance jobs
+        let cancelledCount = 0;
+        if (newStatus === 'Decommissioned' && oldStatus !== 'Decommissioned') {
+          try {
+            console.log('🔧 Vehicle decommissioned — cancelling open maintenance jobs...');
+            const tenantIdForJobs = currentUser?.tenantId;
+            const maintenanceRes = await maintenanceService.getAll(tenantIdForJobs);
+
+            if (maintenanceRes?.success && maintenanceRes?.data) {
+              const allJobs = Array.isArray(maintenanceRes.data) ? maintenanceRes.data : [maintenanceRes.data];
+              const openStatuses = ['logged', 'approved', 'booked', 'in_progress', 'inProgress', 'quality_check', 'qualityCheck'];
+
+              const jobsToCancel = allJobs.filter(job => {
+                const jobVehicleId = job.vehicle?.id || job.vehicle_id || job.vehicleId;
+                return jobVehicleId === selectedVehicle.id && openStatuses.includes(job.status);
+              });
+
+              console.log(`🔧 Found ${jobsToCancel.length} open job(s) to cancel`);
+
+              for (const job of jobsToCancel) {
+                let partsUsed = job.partsUsed || [];
+                if (typeof partsUsed === 'string') {
+                  try { partsUsed = JSON.parse(partsUsed); } catch (e) { partsUsed = []; }
+                }
+
+                const cancelPayload = {
+                  vehicle: { id: selectedVehicle.id },
+                  driver: job.driver?.id || job.driverId ? { id: job.driver?.id || job.driverId } : null,
+                  type: job.type,
+                  status: 'cancelled',
+                  priority: job.priority,
+                  description: `${job.description || ''} (Auto-cancelled: vehicle decommissioned)`.trim(),
+                  reportedBy: job.reportedBy || job.reported_by || 'System',
+                  scheduledDate: job.scheduledDate || job.scheduled_date,
+                  completedDate: new Date().toISOString(),
+                  cost: parseFloat(job.cost) || 0,
+                  mechanic: job.mechanic || 'Pending',
+                  partsUsed: JSON.stringify(partsUsed),
+                  estimatedHours: parseFloat(job.estimatedHours || job.estimated_hours) || 0,
+                  actualHours: parseFloat(job.actualHours || job.actual_hours) || 0,
+                  serviceType: job.serviceType || 'corrective'
+                };
+
+                try {
+                  await maintenanceService.update(job.id, cancelPayload);
+                  cancelledCount++;
+                  console.log(`✅ Cancelled job ${job.id} (${job.type})`);
+                } catch (jobErr) {
+                  console.warn(`⚠️ Failed to cancel job ${job.id}:`, jobErr);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('⚠️ Failed to auto-cancel maintenance jobs:', err);
+          }
+        }
+
+        setSuccessMessage(
+          cancelledCount > 0
+            ? `Vehicle updated. ${cancelledCount} open maintenance job(s) were cancelled.`
+            : 'Vehicle updated successfully!'
+        );
         setShowEditModal(false);
         setSelectedVehicle(null);
         resetForm();

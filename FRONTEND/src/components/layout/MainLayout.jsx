@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from '../common/Sidebar';
 import Header from '../common/Header';
 import TopBar from '../common/TopBar';
+import GlobalAlertPopup from '../common/GlobalAlertPopup';
 
 const MainLayout = ({ children, activeTab, setActiveTab, navItems, onLogout, userRole }) => {  // ✅ ADD userRole prop
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -235,6 +236,8 @@ const MainLayout = ({ children, activeTab, setActiveTab, navItems, onLogout, use
         <div className="p-3 sm:p-6 flex-1 overflow-auto">
           {children}
         </div>
+         {/* 🌐 Global alert popup — shows on every page */}
+        <GlobalAlertPopup />
       </main>
     </div>
   );

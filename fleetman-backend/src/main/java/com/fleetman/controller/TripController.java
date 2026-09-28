@@ -91,6 +91,22 @@ public class TripController {
         return ResponseEntity.ok(ApiResponse.success(count));
     }
 
+        // ✅ NEW: Get all PLANNED (scheduled but not started) trips for a tenant
+    @GetMapping("/tenant/{tenantId}/planned")
+    public ResponseEntity<ApiResponse<List<TripDTO>>> getPlannedTrips(@PathVariable String tenantId) {
+        List<Trip> trips = tripService.getPlannedTripsByTenant(tenantId);
+        List<TripDTO> dtos = trips.stream().map(this::convertToDTO).collect(Collectors.toList());
+        return ResponseEntity.ok(ApiResponse.success(dtos));
+    }
+
+    // ✅ NEW: Get upcoming (planned) trips for a specific driver
+    @GetMapping("/driver/{driverId}/upcoming")
+    public ResponseEntity<ApiResponse<List<TripDTO>>> getUpcomingTripsForDriver(@PathVariable String driverId) {
+        List<Trip> trips = tripService.getUpcomingTripsForDriver(driverId);
+        List<TripDTO> dtos = trips.stream().map(this::convertToDTO).collect(Collectors.toList());
+        return ResponseEntity.ok(ApiResponse.success(dtos));
+    }
+
     private TripDTO convertToDTO(Trip trip) {
         TripDTO dto = new TripDTO();
         dto.setId(trip.getId());
@@ -112,6 +128,12 @@ public class TripController {
         dto.setEndOdometer(trip.getEndOdometer());
         dto.setPurpose(trip.getPurpose());
         dto.setCreatedAt(trip.getCreatedAt());
+
+        dto.setGeofenceId(trip.getGeofence() != null ? trip.getGeofence().getId() : null);
+        dto.setGeofenceName(trip.getGeofence() != null ? trip.getGeofence().getName() : null);
+        dto.setPriority(trip.getPriority());
+        dto.setNotes(trip.getNotes());
+        dto.setUpdatedAt(trip.getUpdatedAt());
         return dto;
     }
 }

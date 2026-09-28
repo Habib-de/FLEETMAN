@@ -62,16 +62,16 @@ public Optional<Trip> findActiveTripWithGeofence(String vehicleId) {
     return tripRepository.findAllActiveWithVehicle();
     }
     
-    @Transactional
+        @Transactional
     public Trip updateTrip(String id, Trip tripDetails) {
         Trip trip = getTripById(id);
         
-        // ✅ ONLY update fields if they are NOT null
-        // This preserves existing values when fields are not sent
+        // ============================================
+        // STANDARD FIELDS (update only if not null)
+        // ============================================
         if (tripDetails.getStartLocation() != null) {
             trip.setStartLocation(tripDetails.getStartLocation());
         }
-        // If startLocation is null, keep the existing value - DON'T set to null
         
         if (tripDetails.getEndLocation() != null) {
             trip.setEndLocation(tripDetails.getEndLocation());
@@ -109,14 +109,51 @@ public Optional<Trip> findActiveTripWithGeofence(String vehicleId) {
             trip.setPurpose(tripDetails.getPurpose());
         }
         
-        // Note: startTime and startOdometer are usually set once and not updated
-        // But if you want to allow updating them:
         if (tripDetails.getStartTime() != null) {
             trip.setStartTime(tripDetails.getStartTime());
         }
         
         if (tripDetails.getStartOdometer() != null) {
             trip.setStartOdometer(tripDetails.getStartOdometer());
+        }
+        
+        // ============================================
+        // ✅ FIX #1: PRIORITY + NOTES
+        // ============================================
+        if (tripDetails.getPriority() != null) {
+            trip.setPriority(tripDetails.getPriority());
+        }
+        
+        if (tripDetails.getNotes() != null) {
+            trip.setNotes(tripDetails.getNotes());
+        }
+        
+        // ============================================
+        // ✅ FIX #2: DRIVER / VEHICLE / GEOFENCE
+        // ============================================
+        // For PLANNED trips (Dispatch), always update these
+        // This allows "unassign" (setting to null)
+        // ============================================
+        boolean isPlannedTrip = "planned".equalsIgnoreCase(trip.getStatus()) 
+                             || "planned".equalsIgnoreCase(tripDetails.getStatus());
+        
+        if (isPlannedTrip) {
+            // Dispatch case: always overwrite (even with null)
+            trip.setDriver(tripDetails.getDriver());
+            trip.setVehicle(tripDetails.getVehicle());
+            trip.setGeofence(tripDetails.getGeofence());
+            System.out.println("📝 Planned trip updated - driver/vehicle/geofence refreshed");
+        } else {
+            // Normal trip: only update if not null
+            if (tripDetails.getDriver() != null) {
+                trip.setDriver(tripDetails.getDriver());
+            }
+            if (tripDetails.getVehicle() != null) {
+                trip.setVehicle(tripDetails.getVehicle());
+            }
+            if (tripDetails.getGeofence() != null) {
+                trip.setGeofence(tripDetails.getGeofence());
+            }
         }
         
         return tripRepository.save(trip);
@@ -131,4 +168,15 @@ public Optional<Trip> findActiveTripWithGeofence(String vehicleId) {
     public long countActiveTrips(String tenantId) {
         return tripRepository.countActiveTrips(tenantId);
     }
+
+    // ✅ NEW: Get all planned (scheduled) trips for a tenant
+    public List<Trip> getPlannedTripsByTenant(String tenantId) {
+        return tripRepository.findByTenantIdAndStatusWithVehicle(tenantId, "planned");
+    }
+    
+    // ✅ NEW: Get upcoming planned trips for a driver
+    public List<Trip> getUpcomingTripsForDriver(String driverId) {
+        return tripRepository.findByDriverIdAndStatus(driverId, "planned");
+    }
+
 }

@@ -19,6 +19,7 @@ import {
   tenantService,
   merchantService
 } from '../../services/api';
+import { eventBus, EVENTS } from '../../services/eventBus'; 
 
 const Maintenance = ({ setActiveTab }) => {
   const { currentUser } = useAuth();
@@ -105,6 +106,7 @@ const Maintenance = ({ setActiveTab }) => {
         jobsData = Array.isArray(maintenanceRes.data) ? maintenanceRes.data : [maintenanceRes.data];
         setMaintenanceJobs(jobsData);
         console.log('✅ Loaded maintenance jobs:', jobsData.length);
+        
       } else {
         setMaintenanceJobs([]);
       }
@@ -212,6 +214,29 @@ const Maintenance = ({ setActiveTab }) => {
     }
   }, [currentUser]);
 
+    // ============================================
+  // ✅ LISTEN FOR VEHICLE EVENTS
+  // ============================================
+  // When Vehicles page changes a vehicle, refresh our data
+  useEffect(() => {
+    const handleVehicleChange = (data) => {
+      console.log('🔄 Maintenance heard vehicle change:', data);
+      loadData();
+    };
+
+    const unsub1 = eventBus.on(EVENTS.VEHICLE_UPDATED, handleVehicleChange);
+    const unsub2 = eventBus.on(EVENTS.VEHICLE_STATUS_CHANGED, handleVehicleChange);
+    const unsub3 = eventBus.on(EVENTS.VEHICLE_CREATED, handleVehicleChange);
+    const unsub4 = eventBus.on(EVENTS.VEHICLE_DELETED, handleVehicleChange);
+
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+      unsub4();
+    };
+  }, [currentUser]);
+
   // ============================================
   // STATISTICS - Enhanced
   // ============================================
@@ -219,12 +244,13 @@ const Maintenance = ({ setActiveTab }) => {
     totalJobs: maintenanceJobs.length,
     inProgress: maintenanceJobs.filter(j => j.status === 'in_progress' || j.status === 'inProgress').length,
     completed: maintenanceJobs.filter(j => j.status === 'closed' || j.status === 'completed').length,
+    cancelled: maintenanceJobs.filter(j => j.status === 'cancelled').length,
     logged: maintenanceJobs.filter(j => j.status === 'logged').length,
     approved: maintenanceJobs.filter(j => j.status === 'approved').length,
     booked: maintenanceJobs.filter(j => j.status === 'booked').length,
     qualityCheck: maintenanceJobs.filter(j => j.status === 'quality_check' || j.status === 'qualityCheck').length,
-    overdue: maintenanceJobs.filter(j => j.priority === 'high' && j.status !== 'closed' && j.status !== 'completed').length,
-    critical: maintenanceJobs.filter(j => j.priority === 'critical' && j.status !== 'closed' && j.status !== 'completed').length,
+    overdue: maintenanceJobs.filter(j => j.priority === 'high' && j.status !== 'closed' && j.status !== 'completed' && j.status !== 'cancelled').length,
+    critical: maintenanceJobs.filter(j => j.priority === 'critical' && j.status !== 'closed' && j.status !== 'completed' && j.status !== 'cancelled').length,
     totalCost: maintenanceJobs.reduce((sum, j) => sum + (parseFloat(j.cost) || 0), 0),
     avgCost: maintenanceJobs.length > 0 
       ? Math.round(maintenanceJobs.reduce((sum, j) => sum + (parseFloat(j.cost) || 0), 0) / maintenanceJobs.length) 
@@ -255,22 +281,24 @@ const Maintenance = ({ setActiveTab }) => {
       'quality_check': 'bg-indigo-100 text-indigo-700 border-indigo-200',
       'qualityCheck': 'bg-indigo-100 text-indigo-700 border-indigo-200',
       'closed': 'bg-green-100 text-green-700 border-green-200',
-      'completed': 'bg-green-100 text-green-700 border-green-200'
+      'completed': 'bg-green-100 text-green-700 border-green-200',
+      'cancelled': 'bg-red-100 text-red-700 border-red-200'
     };
     return colors[status] || 'bg-gray-100 text-gray-700 border-gray-200';
   };
 
   const getStatusLabel = (status) => {
     const labels = {
-      'logged': '📋 Logged',
-      'approved': '✅ Approved',
-      'booked': '📅 Booked',
-      'in_progress': '🔧 In Progress',
-      'inProgress': '🔧 In Progress',
-      'quality_check': '🔍 Quality Check',
-      'qualityCheck': '🔍 Quality Check',
-      'closed': '✅ Completed',
-      'completed': '✅ Completed'
+      'logged': 'Logged',
+      'approved': 'Approved',
+      'booked': 'Booked',
+      'in_progress': 'In Progress',
+      'inProgress': 'In Progress',
+      'quality_check': 'Quality Check',
+      'qualityCheck': 'Quality Check',
+      'closed': 'Completed',
+      'completed': 'Completed',
+      'cancelled': 'Cancelled'
     };
     return labels[status] || status;
   };
@@ -305,11 +333,16 @@ const Maintenance = ({ setActiveTab }) => {
     return icons[priority] || null;
   };
 
-  const getVehicleLabel = (vehicleId) => {
-    if (!vehicleId) return 'Unknown';
-    const vehicle = vehicles.find(v => v.id === vehicleId);
-    return vehicle ? vehicle.registration || vehicle.id : vehicleId;
-  };
+  const getVehicleLabel = (job) => {
+  if (!job) return 'Unknown';
+  // Backend already gives us the registration directly — use it first
+  if (job.vehicleRegistration) return job.vehicleRegistration;
+
+  const vehicleId = job.vehicle?.id || job.vehicle_id || job.vehicleId;
+  if (!vehicleId) return 'Unknown';
+  const vehicle = vehicles.find(v => v.id === vehicleId);
+  return vehicle ? vehicle.registration || vehicle.id : vehicleId;
+};
 
   const getDriverName = (driverId) => {
     if (!driverId) return 'Unassigned';
@@ -348,6 +381,7 @@ const getStatusIcon = (status) => {
   if (s === 'in_progress' || s === 'inprogress') return <Wrench size={14} />;
   if (s === 'quality_check' || s === 'qualitycheck') return <ClipboardList size={14} />;
   if (s === 'closed' || s === 'completed') return <CheckCircle size={14} />;
+  if (s === 'cancelled') return <X size={14} />;
   return <AlertCircle size={14} />;
 };
 
@@ -356,7 +390,7 @@ const getStatusIcon = (status) => {
   // ============================================
   const filteredJobs = maintenanceJobs.filter(job => {
     const matchesSearch = 
-      getVehicleLabel(job.vehicle?.id || job.vehicle_id).toLowerCase().includes(searchTerm.toLowerCase()) ||
+      getVehicleLabel(job).toLowerCase().includes(searchTerm.toLowerCase()) ||
       (job.type || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (job.mechanic || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || job.status === statusFilter;
@@ -873,7 +907,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
   // RENDER ENHANCED KANBAN VIEW
   // ============================================
   const renderKanbanView = () => {
-    const statuses = ['logged', 'approved', 'booked', 'in_progress', 'quality_check', 'closed'];
+    const statuses = ['logged', 'approved', 'booked', 'in_progress', 'quality_check', 'closed', 'cancelled'];
     
     return (
       <div>
@@ -918,73 +952,58 @@ const handleUpdateStatus = async (jobId, newStatus) => {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
           {statuses.map((status) => {
             const statusJobs = filteredJobs.filter(j => j.status === status);
             return (
-              <div key={status} className="border border-gray-200 rounded-lg p-3 min-h-[250px] bg-gray-50">
-                <h4 className="font-medium mb-3 text-xs uppercase text-gray-500 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
-                    {getStatusIcon(status)} {getStatusLabel(status)}
+              <div key={status} className={`border border-gray-200 rounded-lg p-2 bg-gray-50 ${statusJobs.length === 0 ? '' : 'min-h-[140px]'}`}>
+                <h4 className="font-medium mb-2 text-[10px] uppercase text-gray-500 flex items-center justify-between gap-1">
+                  <span className="flex items-center gap-1 truncate">
+                    {getStatusIcon(status)} <span className="truncate">{getStatusLabel(status)}</span>
                   </span>
-                  <span className={`bg-gray-200 text-gray-700 rounded-full px-2 py-0.5 text-xs ${
+                  <span className={`bg-gray-200 text-gray-700 rounded-full px-1.5 py-0.5 text-[10px] flex-shrink-0 ${
                     statusJobs.filter(j => j.priority === 'critical' || j.priority === 'high').length > 0 ? 'bg-red-200 text-red-700' : ''
                   }`}>
                     {statusJobs.length}
-                    {statusJobs.filter(j => j.priority === 'critical' || j.priority === 'high').length > 0 && (
-                      <span className="ml-1 text-red-600">⚠️</span>
-                    )}
                   </span>
                 </h4>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {statusJobs.map((job) => (
                     <div 
                       key={job.id} 
-                      className={`p-2 bg-white rounded border transition-all shadow-sm hover:shadow-md cursor-pointer ${
+                      className={`p-1.5 bg-white rounded border transition-all shadow-sm hover:shadow-md cursor-pointer overflow-hidden ${
                         job.priority === 'critical' ? 'border-red-300 bg-red-50' :
                         job.priority === 'high' ? 'border-orange-200' :
                         'border-gray-200'
                       }`}
                       onClick={() => { setSelectedJob(job); setShowJobModal(true); }}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{getVehicleLabel(job.vehicle?.id || job.vehicle_id)}</p>
-                          <p className="text-xs text-gray-600 truncate">{job.type}</p>
-                        </div>
-                        {job.priority === 'critical' && (
-                          <span className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-full animate-pulse flex-shrink-0 ml-1">
-                            CRITICAL
-                          </span>
-                        )}
-                        {job.priority === 'high' && (
-                          <span className="text-[8px] bg-orange-500 text-white px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1">
-                            HIGH
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${getStatusColor(job.status)}`}>
-                          {getStatusLabel(job.status)}
+                      <p className="text-xs font-medium truncate leading-tight">{getVehicleLabel(job)}</p>
+                      <p className="text-[10px] text-gray-600 truncate leading-tight">{job.type}</p>
+
+                      {(job.priority === 'critical' || job.priority === 'high') && (
+                        <span className={`inline-block mt-1 text-[8px] px-1.5 py-0.5 rounded-full text-white ${
+                          job.priority === 'critical' ? 'bg-red-500' : 'bg-orange-500'
+                        }`}>
+                          {job.priority === 'critical' ? 'CRITICAL' : 'HIGH'}
                         </span>
-                        <span className="text-[10px] text-gray-400">
-                          {job.scheduledDate || job.scheduled_date ? new Date(job.scheduledDate || job.scheduled_date).toLocaleDateString() : 'N/A'}
-                        </span>
-                      </div>
+                      )}
+
                       {job.mechanic && job.mechanic !== 'Pending' && (
-                        <div className="flex items-center gap-1 mt-1 text-[10px] text-gray-500">
-                          <User size={10} /> {job.mechanic}
-                        </div>
+                        <p className="text-[9px] text-gray-500 truncate mt-1 leading-tight">{job.mechanic}</p>
                       )}
+
                       {job.cost > 0 && (
-                        <div className="flex items-center gap-1 mt-0.5 text-[10px] text-gray-500">
-                          <DollarSign size={10} /> KSH {job.cost.toLocaleString()}
-                        </div>
+                        <p className="text-[9px] text-gray-500 truncate leading-tight">KSH {job.cost.toLocaleString()}</p>
                       )}
+
+                      <p className="text-[9px] text-gray-400 truncate leading-tight">
+                        {job.scheduledDate || job.scheduled_date ? new Date(job.scheduledDate || job.scheduled_date).toLocaleDateString() : 'N/A'}
+                      </p>
                     </div>
                   ))}
                   {statusJobs.length === 0 && (
-                    <div className="text-center py-4 text-gray-400 text-xs">
+                    <div className="text-center py-2 text-gray-400 text-[10px]">
                       No jobs
                     </div>
                   )}
@@ -1086,7 +1105,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
                 {dayJobs.slice(0, 2).map((job) => (
                   <div key={job.id} className="mt-0.5 text-[8px] truncate">
                     <span className={`px-1 py-0.5 rounded ${getStatusColor(job.status)}`}>
-                      {getVehicleLabel(job.vehicle?.id || job.vehicle_id)} - {job.type}
+                      {getVehicleLabel(job)} - {job.type}
                     </span>
                   </div>
                 ))}
@@ -1152,29 +1171,30 @@ const handleUpdateStatus = async (jobId, newStatus) => {
             Cost by Vehicle
           </h4>
           <div className="space-y-2 max-h-60 overflow-y-auto">
-            {Object.entries(
-              maintenanceJobs.reduce((acc, job) => {
-                const key = job.vehicle?.id || job.vehicle_id || 'Unknown';
-                acc[key] = (acc[key] || 0) + (parseFloat(job.cost) || 0);
-                return acc;
-              }, {})
-            )
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 6)
-              .map(([vehicle, cost]) => {
-                const percentage = stats.totalCost > 0 ? (cost / stats.totalCost) * 100 : 0;
-                return (
-                  <div key={vehicle}>
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">{getVehicleLabel(vehicle)}</span>
-                      <span className="font-medium">KSH {cost.toLocaleString()}</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="bg-blue-600 rounded-full h-2 transition-all duration-500" style={{ width: `${percentage}%` }}></div>
-                    </div>
-                  </div>
-                );
-              })}
+            
+{Object.entries(
+  maintenanceJobs.reduce((acc, job) => {
+    const key = getVehicleLabel(job); // use the resolved label directly as the key
+    acc[key] = (acc[key] || 0) + (parseFloat(job.cost) || 0);
+    return acc;
+  }, {})
+)
+  .sort((a, b) => b[1] - a[1])
+  .slice(0, 6)
+  .map(([vehicleLabel, cost]) => {
+    const percentage = stats.totalCost > 0 ? (cost / stats.totalCost) * 100 : 0;
+    return (
+      <div key={vehicleLabel}>
+        <div className="flex justify-between text-sm">
+          <span className="font-medium">{vehicleLabel}</span>
+          <span className="font-medium">KSH {cost.toLocaleString()}</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2">
+          <div className="bg-blue-600 rounded-full h-2 transition-all duration-500" style={{ width: `${percentage}%` }}></div>
+        </div>
+      </div>
+    );
+  })}
             {maintenanceJobs.length === 0 && (
               <p className="text-center text-gray-400 text-sm">No data available</p>
             )}
@@ -1227,6 +1247,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
               { label: 'In Progress', count: stats.inProgress, color: 'bg-orange-500' },
               { label: 'Quality Check', count: stats.qualityCheck, color: 'bg-indigo-500' },
               { label: 'Completed', count: stats.completed, color: 'bg-green-500' },
+              { label: 'Cancelled', count: stats.cancelled, color: 'bg-red-500' },
             ].map((item) => (
               <div key={item.label}>
                 <div className="flex justify-between text-sm">
@@ -1296,7 +1317,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
       }
     }
     
-    const jobVehicle = vehicles.find(v => v.id === (selectedJob.vehicle?.id || selectedJob.vehicle_id));
+    const jobVehicle = vehicles.find(v => v.id === (selectedJob.vehicle?.id || selectedJob.vehicle_id || selectedJob.vehicleId));
     
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -1317,7 +1338,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
             <div className="flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-2xl font-bold text-white">{getVehicleLabel(selectedJob.vehicle?.id || selectedJob.vehicle_id)}</h2>
+                  <h2 className="text-2xl font-bold text-white">{getVehicleLabel(selectedJob)}</h2>
                   {selectedJob.priority === 'critical' && (
                     <span className="text-[10px] bg-red-300 text-red-900 px-2 py-0.5 rounded-full animate-pulse">
                       CRITICAL
@@ -1395,7 +1416,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
             )}
 
             <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-200">
-              {selectedJob.status !== 'closed' && selectedJob.status !== 'completed' && (
+              {selectedJob.status !== 'closed' && selectedJob.status !== 'completed' && selectedJob.status !== 'cancelled' && (
                 <>
                   <select 
                     className="flex-1 px-4 py-2 rounded-lg text-sm border border-gray-200 bg-white"
@@ -1476,17 +1497,29 @@ const handleUpdateStatus = async (jobId, newStatus) => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle *</label>
                   <select 
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    value={formData.vehicle_id}
-                    onChange={(e) => setFormData({...formData, vehicle_id: e.target.value})}
-                  >
-                    <option value="">Select Vehicle</option>
-                    {vehicles.map(v => (
-                      <option key={v.id} value={v.id}>
-                        {v.registration || v.id} - {v.make} {v.model}
-                      </option>
-                    ))}
-                  </select>
+  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+  value={formData.vehicle_id}
+  onChange={(e) => setFormData({...formData, vehicle_id: e.target.value})}
+>
+  <option value="">Select Vehicle</option>
+  {vehicles.map(v => {
+    const isDecommissioned = v.status === 'Decommissioned' || v.status === 'decommissioned';
+    const isInMaintenance = v.status === 'Maintenance' || v.status === 'maintenance';
+    
+    return (
+      <option 
+        key={v.id} 
+        value={v.id}
+        disabled={isDecommissioned}
+      >
+        {isDecommissioned ? '🔒 ' : ''}
+        {v.registration || v.id} - {v.make} {v.model}
+        {isDecommissioned ? ' (Decommissioned - Cannot use)' : ''}
+        {isInMaintenance ? ' (In Maintenance)' : ''}
+      </option>
+    );
+  })}
+</select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Service Type *</label>
@@ -1648,7 +1681,7 @@ const handleUpdateStatus = async (jobId, newStatus) => {
             </div>
             <h3 className="text-xl font-bold text-gray-800 mb-2">Delete Maintenance Job?</h3>
             <p className="text-gray-500 text-sm">
-              Are you sure you want to delete this job for {getVehicleLabel(selectedJob.vehicle?.id || selectedJob.vehicle_id)}? This action cannot be undone.
+              Are you sure you want to delete this job for {getVehicleLabel(selectedJob)}? This action cannot be undone.
             </p>
             <div className="flex gap-3 mt-6">
               <button 

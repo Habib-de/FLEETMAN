@@ -33,6 +33,7 @@ import Geofencing from './pages/car-owner/Geofencing';
 import Compliance from './pages/car-owner/Compliance';
 import PoolVehicles from './pages/car-owner/PoolVehicles';
 import Merchants from './pages/car-owner/Merchants';
+import Dispatch from './pages/car-owner/Dispatch';
 
 // Driver Pages
 import DriverDashboard from './pages/driver/DriverDashboard';
@@ -70,6 +71,7 @@ const getNavItems = (role, poolBookingAvailable = false) => {
     ],
     [roles.CAR_OWNER]: [
       ...commonItems,
+      { id: 'dispatch', label: 'Dispatch', icon: Calendar },
       { id: 'tracking', label: 'Live Tracking', icon: Map },
       { id: 'vehicles', label: 'Vehicles', icon: Truck },
       { id: 'maintenance', label: 'Maintenance', icon: Wrench },
@@ -128,6 +130,7 @@ const PageRenderer = ({ tab, role, setActiveTab }) => {
   // Car Owner Pages
   const ownerPages = {
     dashboard: <OwnerDashboard setActiveTab={setActiveTab} />,
+    dispatch: <Dispatch setActiveTab={setActiveTab} />,
     tracking: <Tracking setActiveTab={setActiveTab} />,
     vehicles: <Vehicles setActiveTab={setActiveTab} />,
     maintenance: <Maintenance setActiveTab={setActiveTab} />,

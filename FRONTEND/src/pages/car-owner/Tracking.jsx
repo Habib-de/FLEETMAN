@@ -7,7 +7,7 @@ import {
   RefreshCw, History, AlertCircle, Activity, X, Eye,
   Play, Square, Flag, MapPin, Pause, SkipBack, SkipForward,
   User, Battery, BatteryCharging, BatteryLow, BatteryMedium, BatteryFull,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, CheckCircle, Send
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -18,9 +18,11 @@ import {
   geofenceService, 
   trackingService,
   tripService,
-  incidentService
+  incidentService,
+  driverReportService
 } from '../../services/api';
 import webSocketService from '../../services/websocket';
+import AlertModal from '../../components/common/AlertModal';
 
 // Fix for default marker icons in Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -943,6 +945,13 @@ const Tracking = () => {
   
   const [showPlayback, setShowPlayback] = useState(false);
   const [playbackVehicle, setPlaybackVehicle] = useState(null);
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertVehicle, setAlertVehicle] = useState(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [activeReport, setActiveReport] = useState(null);
+  const [showReportReplyModal, setShowReportReplyModal] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [acknowledgingReport, setAcknowledgingReport] = useState(false);
   
   const [historyPage, setHistoryPage] = useState(1);
   const itemsPerPage = 10;
@@ -1070,7 +1079,7 @@ const Tracking = () => {
   // HANDLE TRIP UPDATES
   // ============================================
   const handleTripUpdate = (data) => {
-    if (data.status === 'active' || data.status === 'planned' || data.status === 'In Progress') {
+    if (data.status === 'active' || data.status === 'In Progress') {
       setActiveTrips(prev => {
         const existing = prev.find(t => t.id === data.id);
         if (existing) {
@@ -1279,7 +1288,7 @@ const loadData = async () => {
       
       activeTripsData = allTrips
         .filter(t => {
-          const isActive = t.status === 'active' || t.status === 'In Progress' || t.status === 'planned';
+          const isActive = t.status === 'active' || t.status === 'In Progress';
           console.log(`  Trip ${t.id} (${t.status}): ${isActive ? '✅ ACTIVE' : '❌ NOT ACTIVE'}`);
           return isActive;
         })
@@ -1685,6 +1694,93 @@ if (vehicleFuelLevel > 0 && vehicleFuelTankCapacity > 0) {
     };
   }, []);
 
+    // ============================================
+  // ✅ LISTEN FOR DRIVER REPORTS
+  // ============================================
+  useEffect(() => {
+    const handleNewNotification = (event) => {
+      const notif = event.detail;
+      if (!notif) return;
+
+      const type = notif.type || '';
+      if (!type.startsWith('driver_report_')) return;
+
+      // Ignore replies/acks/resolves — those go to the driver, not the manager
+      if (
+        type.startsWith('driver_report_reply_') ||
+        type.startsWith('driver_report_ack_') ||
+        type.startsWith('driver_report_resolved_')
+      ) {
+        return;
+      }
+
+      const reportCode = type.replace('driver_report_', '');
+      console.log('📣 Driver report received:', reportCode, notif);
+
+      setActiveReport({
+        id: notif.id,
+        code: reportCode,
+        title: notif.title || 'Driver Report',
+        message: notif.message || '',
+        createdAt: notif.createdAt || new Date().toISOString(),
+      });
+
+      // Beep for critical reports
+      if (['EMERGENCY', 'ACCIDENT', 'BREAKDOWN', 'CALLBACK'].includes(reportCode)) {
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.frequency.value = 520;
+          gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.5);
+        } catch (e) { /* silent */ }
+      }
+    };
+
+    window.addEventListener('newNotification', handleNewNotification);
+
+    // Also fetch existing unread driver reports on mount
+    const checkExistingReports = async () => {
+      if (!currentUser?.id) return;
+      try {
+        const { notificationService } = await import('../../services/api');
+        const res = await notificationService.getUnread(currentUser.id);
+        const notifications = res?.data || [];
+        const reports = notifications.filter(n => {
+          const t = n.type || '';
+          if (!t.startsWith('driver_report_')) return false;
+          if (t.startsWith('driver_report_reply_')) return false;
+          if (t.startsWith('driver_report_ack_')) return false;
+          if (t.startsWith('driver_report_resolved_')) return false;
+          return true;
+        });
+        if (reports.length > 0) {
+          const latest = reports[0];
+          setActiveReport({
+            id: latest.id,
+            code: (latest.type || '').replace('driver_report_', ''),
+            title: latest.title || 'Driver Report',
+            message: latest.message || '',
+            createdAt: latest.createdAt || new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.warn('Could not check existing driver reports:', e);
+      }
+    };
+
+    checkExistingReports();
+
+    return () => {
+      window.removeEventListener('newNotification', handleNewNotification);
+    };
+  }, [currentUser?.id]);
+
   // ============================================
   // HANDLE FUNCTIONS
   // ============================================
@@ -1776,31 +1872,11 @@ if (vehicleFuelLevel > 0 && vehicleFuelTankCapacity > 0) {
   };
 
   const handleAlert = (vehicle) => {
-    if (!vehicle) return;
-    const createIncident = async () => {
-      try {
-        const incidentData = {
-          tenant: { id: currentUser?.tenantId },
-          vehicle: { id: vehicle.id },
-          driver: vehicle.driverId ? { id: vehicle.driverId } : null,
-          incidentType: 'Manual Alert',
-          severity: 'High',
-          status: 'reported',
-          location: vehicle.lat && vehicle.lng ? `${vehicle.lat}, ${vehicle.lng}` : 'Unknown',
-          description: `Manual alert triggered for vehicle ${vehicle.reg}`,
-          reportedBy: currentUser?.name || 'System'
-        };
-        await incidentService.create(incidentData);
-        alert(`Alert created for ${vehicle.reg}`);
-        loadData();
-      } catch (e) {
-        console.error('Failed to create incident:', e);
-        alert('Failed to create alert. Please try again.');
-      }
-    };
-    createIncident();
-    closeModal();
-  };
+  if (!vehicle) return;
+  setAlertVehicle(vehicle);
+  setShowAlertModal(true);
+  closeModal();
+};
 
   const handleNavigate = (vehicle) => {
     if (vehicle && vehicle.lat && vehicle.lng) {
@@ -2032,6 +2108,87 @@ if (vehicleFuelLevel > 0 && vehicleFuelTankCapacity > 0) {
 
   return (
     <div className="space-y-3 md:space-y-4 overflow-x-hidden">
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-700 text-sm flex items-center gap-2">
+          <CheckCircle size={16} />
+          {successMessage}
+        </div>
+      )}
+
+            {/* ============================================ */}
+      {/* 📣 DRIVER REPORT BANNER (driver → manager) */}
+      {/* ============================================ */}
+      {activeReport && (
+        <div
+          className={`rounded-xl p-4 shadow-lg border-2 ${
+            ['EMERGENCY', 'ACCIDENT'].includes(activeReport.code)
+              ? 'bg-red-50 border-red-500 text-red-900 animate-pulse'
+              : ['BREAKDOWN', 'CALLBACK'].includes(activeReport.code)
+                ? 'bg-orange-50 border-orange-500 text-orange-900'
+                : 'bg-blue-50 border-blue-500 text-blue-900'
+          }`}
+        >
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="flex-shrink-0 text-3xl">
+              {activeReport.code === 'EMERGENCY' && '🚨'}
+              {activeReport.code === 'ACCIDENT' && '💥'}
+              {activeReport.code === 'BREAKDOWN' && '🔧'}
+              {activeReport.code === 'CALLBACK' && '📞'}
+              {activeReport.code === 'ROAD_ISSUE' && '🚧'}
+              {activeReport.code === 'FUEL' && '⛽'}
+              {activeReport.code === 'TRAFFIC' && '🚦'}
+              {activeReport.code === 'DELAY' && '⏱️'}
+              {activeReport.code === 'MESSAGE' && '💬'}
+              {activeReport.code === 'OTHER' && '📝'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-wider opacity-70 font-semibold">
+                Driver Report
+              </p>
+              <h3 className="text-lg font-bold">{activeReport.title}</h3>
+              <p className="text-sm mt-1 whitespace-pre-line">{activeReport.message}</p>
+              <p className="text-[10px] opacity-60 mt-1">
+                {new Date(activeReport.createdAt).toLocaleTimeString()}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 flex-shrink-0">
+              <button
+                onClick={() => setShowReportReplyModal(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 flex items-center gap-1.5"
+              >
+                <Send size={14} /> Reply
+              </button>
+              <button
+                                onClick={async () => {
+                  setAcknowledgingReport(true);
+                  try {
+                    if (driverReportService.acknowledge) {
+                      await driverReportService.acknowledge(activeReport.id);
+                    }
+                    setSuccessMessage('✅ Report acknowledged');
+                    setTimeout(() => setSuccessMessage(''), 3000);
+                    setActiveReport(null);
+                  } catch (e) {
+                    setError('Failed to acknowledge');
+                  } finally {
+                    setAcknowledgingReport(false);
+                  }
+                }}
+                disabled={acknowledgingReport}
+                className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50"
+              >
+                Acknowledge
+              </button>
+              <button
+                onClick={() => setActiveReport(null)}
+                className="px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-white/50 rounded-lg"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Controls Bar - Mobile Responsive - NO LOCATION DROPDOWN */}
       <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200">
         <div className="flex flex-wrap items-center gap-2 md:gap-3">
@@ -2549,6 +2706,19 @@ if (vehicleFuelLevel > 0 && vehicleFuelTankCapacity > 0) {
         </div>
       )}
 
+      <AlertModal
+  vehicle={alertVehicle}
+  isOpen={showAlertModal}
+  onClose={() => {
+    setShowAlertModal(false);
+    setAlertVehicle(null);
+  }}
+  onSent={() => {
+    setSuccessMessage?.('✅ Alert sent to driver');
+    setTimeout(() => setSuccessMessage?.(''), 3000);
+  }}
+/>
+
       {renderHistoryModal()}
 
       <RoutePlayback 
@@ -2557,6 +2727,69 @@ if (vehicleFuelLevel > 0 && vehicleFuelTankCapacity > 0) {
         onClose={handleClosePlayback}
         onMapCenter={handleMapCenter}
       />
+
+            {/* ============================================ */}
+      {/* 💬 DRIVER REPORT REPLY MODAL */}
+      {/* ============================================ */}
+      {showReportReplyModal && activeReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="absolute inset-0" onClick={() => setShowReportReplyModal(false)}></div>
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold">Reply to Driver</h3>
+              <button
+                onClick={() => setShowReportReplyModal(false)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg"
+              >
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="mb-3 p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
+              <p className="font-medium mb-1">{activeReport.title}</p>
+              <p className="whitespace-pre-line">{activeReport.message}</p>
+            </div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Your reply
+            </label>
+            <textarea
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              rows={4}
+              className="w-full border border-gray-200 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              placeholder="Type your reply to the driver..."
+            />
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={async () => {
+                  if (!replyText.trim()) return;
+                  try {
+                    // Send reply via the driver reply endpoint
+                    const { notificationService } = await import('../../services/api');
+                    // Use the notify endpoint through the driver report service
+                    await driverReportService.reply(activeReport.id, replyText);
+                    setReplyText('');
+                    setShowReportReplyModal(false);
+                    setSuccessMessage('✅ Reply sent to driver');
+                    setTimeout(() => setSuccessMessage(''), 3000);
+                  } catch (e) {
+                    setError('Failed to send reply');
+                  }
+                }}
+                disabled={!replyText.trim()}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <Send size={16} /> Send Reply
+              </button>
+              <button
+                onClick={() => setShowReportReplyModal(false)}
+                className="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .custom-marker {

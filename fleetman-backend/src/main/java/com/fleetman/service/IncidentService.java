@@ -5,6 +5,7 @@ import com.fleetman.entity.Incident;
 import com.fleetman.exception.ResourceNotFoundException;
 import com.fleetman.repository.IncidentRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,12 +14,17 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class IncidentService {
     
     private final IncidentRepository incidentRepository;
     private final DriverService driverService;
-    
-        @Transactional
+    private final NotificationService notificationService;  // ✅ ADDED
+
+    // ============================================
+    // ✅ CREATE + NOTIFY
+    // ============================================
+    @Transactional
     public Incident createIncident(Incident incident) {
         Incident saved = incidentRepository.save(incident);
         
@@ -28,6 +34,11 @@ public class IncidentService {
         if (saved.getDriver() != null && saved.getDriver().getId() != null) {
             updateDriverSafetyScore(saved.getDriver().getId(), saved.getSeverity());
         }
+
+        // ============================================
+        // ✅ NEW: NOTIFY CAR OWNERS
+        // ============================================
+        notifyTenantAboutIncident(saved);
         
         return saved;
     }
@@ -53,16 +64,18 @@ public class IncidentService {
         return incidentRepository.findRecentIncidents(tenantId, startDate);
     }
 
-    // In IncidentService.java - add this method
-     public List<Incident> getAllIncidents() {
-    return incidentRepository.findAll();
+    public List<Incident> getAllIncidents() {
+        return incidentRepository.findAll();
     }
 
     public List<Incident> getIncidentsByDriver(String driverId) {
-    return incidentRepository.findByDriverId(driverId);
-}
+        return incidentRepository.findByDriverId(driverId);
+    }
     
-        @Transactional
+    // ============================================
+    // ✅ UPDATE + NOTIFY ON ESCALATION
+    // ============================================
+    @Transactional
     public Incident updateIncident(String id, Incident incidentDetails) {
         // Get existing incident
         Incident existing = getIncidentById(id);
@@ -88,11 +101,18 @@ public class IncidentService {
         if (driverId != null && !oldSeverity.equals(incidentDetails.getSeverity())) {
             recalculateDriverSafetyScore(driverId);
         }
+
+        // ✅ NEW: NOTIFY IF SEVERITY ESCALATED
+        boolean severityEscalated = isSeverityEscalated(oldSeverity, incidentDetails.getSeverity());
+        if (severityEscalated) {
+            log.info("🔔 Severity escalated: {} → {}", oldSeverity, incidentDetails.getSeverity());
+            notifyTenantAboutIncident(saved);
+        }
         
         return saved;
     }
     
-        @Transactional
+    @Transactional
     public void deleteIncident(String id) {
         Incident incident = getIncidentById(id);
         String driverId = incident.getDriver() != null ? incident.getDriver().getId() : null;
@@ -105,7 +125,82 @@ public class IncidentService {
         }
     }
 
-        // ============================================
+    // ============================================
+    // ✅ NEW: NOTIFY TENANT OWNERS ABOUT INCIDENT
+    // ============================================
+    private void notifyTenantAboutIncident(Incident incident) {
+        try {
+            if (incident == null || incident.getTenant() == null) {
+                log.warn("⚠️ Cannot notify — incident has no tenant");
+                return;
+            }
+
+            String severity = incident.getSeverity() != null 
+                ? incident.getSeverity().toLowerCase() 
+                : "medium";
+
+            // High severity → alert, others → warning
+            String type = (severity.equals("high") || severity.equals("critical")) 
+                ? "alert" 
+                : "warning";
+
+            String vehicleReg = incident.getVehicle() != null 
+                ? incident.getVehicle().getRegistration() 
+                : "Unknown vehicle";
+
+            String incidentType = incident.getIncidentType() != null 
+                ? incident.getIncidentType() 
+                : "Incident";
+
+            String title = "🚨 " + incidentType + " Reported";
+
+            String message = String.format(
+                "%s on %s. Severity: %s. %s",
+                incidentType,
+                vehicleReg,
+                incident.getSeverity() != null ? incident.getSeverity() : "Medium",
+                incident.getDescription() != null ? incident.getDescription() : ""
+            );
+
+            notificationService.notifyTenantOwners(
+                incident.getTenant().getId(),
+                type,
+                title,
+                message,
+                "/incidents"
+            );
+
+            log.info("🔔 Incident notification sent to tenant owners: {}", title);
+
+        } catch (Exception e) {
+            log.error("❌ Failed to send incident notification: {}", e.getMessage(), e);
+        }
+    }
+
+    // ============================================
+    // ✅ NEW: Check if severity went UP
+    // ============================================
+    private boolean isSeverityEscalated(String oldSeverity, String newSeverity) {
+        if (oldSeverity == null || newSeverity == null) return false;
+        
+        int oldLevel = getSeverityLevel(oldSeverity);
+        int newLevel = getSeverityLevel(newSeverity);
+        
+        return newLevel > oldLevel;
+    }
+
+    private int getSeverityLevel(String severity) {
+        if (severity == null) return 0;
+        switch (severity.toLowerCase()) {
+            case "critical": return 4;
+            case "high": return 3;
+            case "medium": return 2;
+            case "low": return 1;
+            default: return 0;
+        }
+    }
+
+    // ============================================
     // ✅ HELPER: Get deduction based on severity
     // ============================================
     private int getDeductionForSeverity(String severity) {
@@ -132,7 +227,7 @@ public class IncidentService {
         try {
             Driver driver = driverService.getDriverById(driverId);
             if (driver == null) {
-                System.out.println("⚠️ Driver not found: " + driverId);
+                log.warn("⚠️ Driver not found: {}", driverId);
                 return;
             }
             
@@ -143,51 +238,46 @@ public class IncidentService {
             driver.setSafetyScore(newScore);
             driverService.updateDriver(driverId, driver);
             
-            System.out.println("✅ Driver " + driver.getName() + " safety score updated: " + 
-                currentScore + " → " + newScore + " (-" + deduction + ")");
+            log.info("✅ Driver {} safety score updated: {} → {} (-{})",
+                driver.getName(), currentScore, newScore, deduction);
             
         } catch (Exception e) {
-            System.err.println("❌ Failed to update driver safety score: " + e.getMessage());
+            log.error("❌ Failed to update driver safety score: {}", e.getMessage());
         }
     }
 
-        // ============================================
+    // ============================================
     // ✅ RECALCULATE DRIVER SAFETY SCORE
     // ============================================
     private void recalculateDriverSafetyScore(String driverId) {
         try {
-            // Get all incidents for this driver
             List<Incident> driverIncidents = incidentRepository.findByDriverId(driverId);
             
             Driver driver = driverService.getDriverById(driverId);
             if (driver == null) {
-                System.out.println("⚠️ Driver not found: " + driverId);
+                log.warn("⚠️ Driver not found: {}", driverId);
                 return;
             }
             
-            // Start with base score 100
             int baseScore = 100;
             int totalDeduction = 0;
             
-            // Calculate total deduction from all incidents
             for (Incident incident : driverIncidents) {
-                // Only deduct if incident is NOT resolved (or always deduct, up to you)
                 if (!"resolved".equalsIgnoreCase(incident.getStatus()) && 
                     !"closed".equalsIgnoreCase(incident.getStatus())) {
                     totalDeduction += getDeductionForSeverity(incident.getSeverity());
                 }
             }
             
-            // Ensure score doesn't go below 0 or above 100
             int newScore = Math.max(0, Math.min(100, baseScore - totalDeduction));
             
             driver.setSafetyScore(newScore);
             driverService.updateDriver(driverId, driver);
             
-            System.out.println("🔄 Driver " + driver.getName() + " safety score recalculated: " + newScore);
+            log.info("🔄 Driver {} safety score recalculated: {}", driver.getName(), newScore);
             
         } catch (Exception e) {
-            System.err.println("❌ Failed to recalculate driver safety score: " + e.getMessage());
+            log.error("❌ Failed to recalculate driver safety score: {}", e.getMessage());
         }
     }
 }

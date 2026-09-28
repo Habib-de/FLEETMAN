@@ -1,9 +1,16 @@
-"node_modules/" 
-"target/" 
-"node_modules/" 
-"target/" 
-node_modules/ 
-target/ 
-FRONTEND/node_modules/ 
-*.pack 
-.cache/ 
+# Dependencies
+node_modules/
+FRONTEND/node_modules/
+
+# Java / Maven build output
+target/
+
+# Expo cache
+.expo/
+
+# Misc
+*.pack
+.cache/
+
+# IDE
+.vscode/

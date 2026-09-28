@@ -74,6 +74,37 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.success("Notification deleted successfully", null));
     }
 
+        /**
+     * Manager replies to a driver report.
+     * The reply is sent as a notification to the driver referenced by the
+     * original driver-report notification.
+     *
+     * POST /api/notifications/{id}/reply
+     * Body: { "message": "On my way", "driverUserId": "uuid" }
+     */
+    @PostMapping("/{id}/reply")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<Void>> replyToDriver(
+            @PathVariable String id,
+            @RequestBody java.util.Map<String, String> body) {
+        String message = body.get("message");
+        String driverUserId = body.get("driverUserId");
+
+        if (message == null || message.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponse.error("message is required"));
+        }
+
+        try {
+            notificationService.replyToDriverReport(id, driverUserId, message);
+            return ResponseEntity.ok(ApiResponse.success("Reply sent to driver", null));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Failed to send reply"));
+        }
+    }
+
     private NotificationDTO convertToDTO(Notification notification) {
         NotificationDTO dto = new NotificationDTO();
         dto.setId(notification.getId());

@@ -74,6 +74,12 @@ public class Trip {
     
     @Column(name = "purpose", columnDefinition = "TEXT")
     private String purpose;
+
+    @Column(name = "priority", length = 20)
+    private String priority = "normal"; 
+
+    @Column(name = "notes", columnDefinition = "TEXT")
+    private String notes;
     
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

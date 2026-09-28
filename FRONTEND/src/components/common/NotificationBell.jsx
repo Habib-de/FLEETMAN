@@ -8,7 +8,8 @@ import {
   incidentService, 
   geofenceService, 
   tenantService, 
-  userService 
+  userService,
+  notificationService
 } from '../../services/api';
 
 const NotificationBell = () => {
@@ -24,25 +25,6 @@ const NotificationBell = () => {
   const userName = currentUser?.name || 'User';
   const userTenantId = currentUser?.tenantId;
   const userEmail = currentUser?.email;
-
-  // ============================================
-  // LOAD READ STATUS FROM LOCALSTORAGE
-  // ============================================
-  const loadReadStatus = () => {
-    try {
-      return JSON.parse(localStorage.getItem('read_notifications') || '[]');
-    } catch {
-      return [];
-    }
-  };
-
-  const saveReadStatus = (id) => {
-    const readNotifs = loadReadStatus();
-    if (!readNotifs.includes(id)) {
-      readNotifs.push(id);
-      localStorage.setItem('read_notifications', JSON.stringify(readNotifs));
-    }
-  };
 
   // ============================================
   // NAVIGATION
@@ -80,7 +62,6 @@ const NotificationBell = () => {
 
     setIsLoading(true);
     const items = [];
-    const readNotifs = loadReadStatus();
 
     try {
       // ============================================
@@ -93,19 +74,22 @@ const NotificationBell = () => {
       let geofenceViolations = [];
       let tenants = [];
       let users = [];
+      let backendNotifications = [];
 
       try {
-        const [vehiclesRes, driversRes, incidentsRes, geofenceRes] = await Promise.all([
+        const [vehiclesRes, driversRes, incidentsRes, geofenceRes, notifsRes] = await Promise.all([
           vehicleService.getAll(userTenantId),
           driverService.getAll(userTenantId),
           incidentService.getByTenant(userTenantId),
-          geofenceService.getViolations(userTenantId)
+          geofenceService.getViolations(userTenantId),
+          notificationService.getByUser(currentUser.id).catch(() => ({ data: [] }))
         ]);
         
         vehicles = getData(vehiclesRes);
         drivers = getData(driversRes);
         incidents = getData(incidentsRes);
         geofenceViolations = getData(geofenceRes);
+        backendNotifications = notifsRes?.data || [];
       } catch (e) {
         console.warn('Failed to fetch data:', e);
       }
@@ -568,48 +552,41 @@ const NotificationBell = () => {
       }
 
       // ============================================
-      // ✅ ADDED: INCIDENT NOTIFICATIONS FROM LOCALSTORAGE
+      // ✅ BACKEND NOTIFICATIONS (from database)
       // ============================================
-      try {
-        const savedNotifications = JSON.parse(localStorage.getItem('fleetman_notifications') || '[]');
-        
-        savedNotifications.forEach(notif => {
-          // Check if this is an incident notification
-          const isIncidentNotif = 
-            notif.title?.includes('Incident') || 
-            notif.title?.includes('🚨') ||
-            notif.link === '/incidents' ||
-            notif.message?.includes('incident');
-          
-          if (isIncidentNotif) {
-            // Check if already exists in items
-            const exists = items.some(item => item.id === notif.id);
-            if (!exists) {
-              const type = notif.message?.includes('High') || notif.message?.includes('Critical') ? 'alert' : 'warning';
-              const isRead = notif.read || readNotifs.includes(notif.id);
-              
-              items.push({
-                id: notif.id || `incident_${Date.now()}`,
-                title: notif.title || '🚨 Incident Reported',
-                description: notif.message || 'Incident reported in your fleet',
-                details: notif.message || 'Please review the incident details.',
-                time: notif.createdAt ? new Date(notif.createdAt).toLocaleString() : 'Now',
-                type: type,
-                role: 'car_owner',
-                icon: 'AlertOctagon',
-                actionLabel: 'View Incident',
-                action: () => {
-                  if (typeof window.setActiveTab === 'function') {
-                    window.setActiveTab('incidents');
-                  }
-                },
-                read: isRead
-              });
-            }
-          }
+      if (Array.isArray(backendNotifications)) {
+        backendNotifications.forEach(n => {
+          // Skip if we already added an item with this ID
+          if (items.some(item => item.id === n.id)) return;
+
+          items.push({
+            id: n.id,
+            title: n.title || 'Notification',
+            description: n.message || '',
+            details: n.message || 'No additional details.',
+            time: n.createdAt ? new Date(n.createdAt).toLocaleString() : 'Now',
+            type: n.type || 'info',
+            role: userRole,
+            icon: 'Bell',
+            actionLabel: 'View',
+            link: n.link,
+            action: () => {
+              if (n.link) {
+                const tab = n.link.replace(/^\//, '');
+                if (typeof window.setActiveTab === 'function') {
+                  window.setActiveTab(tab);
+                } else {
+                  window.dispatchEvent(new CustomEvent('navigateTo', {
+                    detail: { tab }
+                  }));
+                }
+              }
+              setShowNotifications(false);
+            },
+            read: n.isRead === true || n.read === true,
+            fromBackend: true
+          });
         });
-      } catch (e) {
-        console.warn('Could not load incident notifications:', e);
       }
 
     } catch (error) {
@@ -629,13 +606,7 @@ const NotificationBell = () => {
       return 0;
     });
 
-    // Apply read status from localStorage
-    const itemsWithReadStatus = items.map(item => ({
-      ...item,
-      read: readNotifs.includes(item.id) || item.read || false
-    }));
-
-    const limitedItems = itemsWithReadStatus.slice(0, 10);
+    const limitedItems = items.slice(0, 10);
     const unread = limitedItems.filter(item => !item.read).length;
 
     setNotifications(limitedItems);
@@ -662,50 +633,81 @@ const NotificationBell = () => {
   useEffect(() => {
     const handleNewNotification = (event) => {
       const newNotif = event.detail;
-      if (newNotif) {
-        setNotifications(prev => {
-          const exists = prev.some(n => n.id === newNotif.id);
-          if (!exists) {
-            const updated = [{ ...newNotif, read: false }, ...prev];
-            return updated.slice(0, 10);
-          }
-          return prev;
-        });
-        setUnreadCount(prev => prev + 1);
-      }
-    };
+      if (!newNotif) return;
 
-    // Also listen for localStorage changes
-    const handleStorageChange = (e) => {
-      if (e.key === 'fleetman_notifications') {
-        loadNotifications();
-      }
+      // Normalize to our shape
+      const normalized = {
+        id: newNotif.id,
+        title: newNotif.title || 'Notification',
+        description: newNotif.message || '',
+        details: newNotif.message || 'No additional details.',
+        time: newNotif.createdAt ? new Date(newNotif.createdAt).toLocaleString() : 'Now',
+        type: newNotif.type || 'info',
+        role: userRole,
+        icon: 'Bell',
+        actionLabel: 'View',
+        link: newNotif.link,
+        action: () => {
+          if (newNotif.link) {
+            const tab = newNotif.link.replace(/^\//, '');
+            if (typeof window.setActiveTab === 'function') {
+              window.setActiveTab(tab);
+            }
+          }
+          setShowNotifications(false);
+        },
+        read: false,
+        fromBackend: true
+      };
+
+      setNotifications(prev => {
+        if (prev.some(n => n.id === normalized.id)) return prev;
+        return [normalized, ...prev].slice(0, 10);
+      });
+      setUnreadCount(prev => prev + 1);
     };
 
     window.addEventListener('newNotification', handleNewNotification);
-    window.addEventListener('storage', handleStorageChange);
 
     return () => {
       window.removeEventListener('newNotification', handleNewNotification);
-      window.removeEventListener('storage', handleStorageChange);
     };
-  }, []);
+  }, [userRole]);
 
   // ============================================
   // MARK FUNCTIONS
   // ============================================
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
+    // Update UI immediately
     setNotifications(notifications.map(n => ({ ...n, read: true })));
     setUnreadCount(0);
-    notifications.forEach(n => saveReadStatus(n.id));
+
+    // Sync with backend
+    try {
+      if (currentUser?.id) {
+        await notificationService.markAllAsRead(currentUser.id);
+      }
+    } catch (error) {
+      console.warn('Failed to mark all as read on backend:', error);
+    }
   };
 
-  const markAsRead = (id) => {
+  const markAsRead = async (id) => {
+    // Update UI immediately
     setNotifications(notifications.map(n => 
       n.id === id ? { ...n, read: true } : n
     ));
     setUnreadCount(prev => Math.max(0, prev - 1));
-    saveReadStatus(id);
+
+    // Sync with backend ONLY if this is a backend notification
+    const notif = notifications.find(n => n.id === id);
+    if (notif?.fromBackend) {
+      try {
+        await notificationService.markAsRead(id);
+      } catch (error) {
+        console.warn('Failed to mark as read on backend:', error);
+      }
+    }
   };
 
   // ============================================
@@ -891,81 +893,81 @@ const NotificationBell = () => {
         </button>
         
         {showNotifications && (
-  <div className="fixed inset-0 z-50 flex items-end justify-center sm:absolute sm:right-0 sm:mt-2 sm:w-80 sm:inset-auto sm:block sm:max-h-[80vh]">
-    {/* Mobile backdrop */}
-    <div className="absolute inset-0 bg-black/30 sm:hidden" onClick={() => setShowNotifications(false)}></div>
-    
-    {/* Notification panel */}
-    <div className="relative w-full max-h-[80vh] bg-white rounded-t-2xl sm:rounded-lg shadow-xl border border-gray-200 overflow-hidden z-20 sm:max-h-[80vh]">
-      <div className="p-3 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
-        <h3 className="font-semibold text-sm flex items-center gap-2">
-          Notifications
-          {userRole === 'car_owner' && (
-            <Users size={14} className="text-blue-500" />
-          )}
-          <span className="text-xs text-gray-400 font-normal">
-            ({notifications.length})
-          </span>
-        </h3>
-        <div className="flex items-center gap-2">
-          {unreadCount > 0 && (
-            <button 
-              onClick={markAllAsRead}
-              className="text-xs text-blue-600 hover:underline"
-            >
-              Mark all read
-            </button>
-          )}
-          <button 
-            onClick={() => setShowNotifications(false)}
-            className="p-1 hover:bg-gray-100 rounded"
-          >
-            <X size={14} className="text-gray-400" />
-          </button>
-        </div>
-      </div>
-      
-      <div className="overflow-y-auto max-h-[60vh] sm:max-h-64">
-        {notifications.length > 0 ? (
-          <>
-            {notifications.map((notif) => (
-              <div 
-                key={notif.id} 
-                className={`p-3 border-b border-gray-100 transition-colors cursor-pointer ${getBgColor(notif.type)} ${!notif.read ? 'border-l-4 border-l-blue-500' : ''}`}
-                onClick={() => openNotificationModal(notif)}
-              >
-                <div className="flex items-start gap-2">
-                  {getIcon(notif.type)}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{notif.title}</p>
-                    <p className="text-xs text-gray-600 truncate">{notif.description}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">{notif.time}</p>
-                  </div>
-                  {!notif.read && (
-                    <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1"></span>
+          <div className="fixed inset-0 z-50 flex items-end justify-center sm:absolute sm:right-0 sm:mt-2 sm:w-80 sm:inset-auto sm:block sm:max-h-[80vh]">
+            {/* Mobile backdrop */}
+            <div className="absolute inset-0 bg-black/30 sm:hidden" onClick={() => setShowNotifications(false)}></div>
+            
+            {/* Notification panel */}
+            <div className="relative w-full max-h-[80vh] bg-white rounded-t-2xl sm:rounded-lg shadow-xl border border-gray-200 overflow-hidden z-20 sm:max-h-[80vh]">
+              <div className="p-3 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
+                <h3 className="font-semibold text-sm flex items-center gap-2">
+                  Notifications
+                  {userRole === 'car_owner' && (
+                    <Users size={14} className="text-blue-500" />
                   )}
+                  <span className="text-xs text-gray-400 font-normal">
+                    ({notifications.length})
+                  </span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={markAllAsRead}
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setShowNotifications(false)}
+                    className="p-1 hover:bg-gray-100 rounded"
+                  >
+                    <X size={14} className="text-gray-400" />
+                  </button>
                 </div>
               </div>
-            ))}
-            
-            <div 
-              onClick={navigateToNotifications}
-              className="p-2 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors border-t border-gray-200 flex items-center justify-center gap-1"
-            >
-              <span className="text-sm text-blue-600 font-medium">View All Notifications</span>
-              <ChevronRight size={16} className="text-blue-600" />
+              
+              <div className="overflow-y-auto max-h-[60vh] sm:max-h-64">
+                {notifications.length > 0 ? (
+                  <>
+                    {notifications.map((notif) => (
+                      <div 
+                        key={notif.id} 
+                        className={`p-3 border-b border-gray-100 transition-colors cursor-pointer ${getBgColor(notif.type)} ${!notif.read ? 'border-l-4 border-l-blue-500' : ''}`}
+                        onClick={() => openNotificationModal(notif)}
+                      >
+                        <div className="flex items-start gap-2">
+                          {getIcon(notif.type)}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{notif.title}</p>
+                            <p className="text-xs text-gray-600 truncate">{notif.description}</p>
+                            <p className="text-[10px] text-gray-400 mt-1">{notif.time}</p>
+                          </div>
+                          {!notif.read && (
+                            <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1"></span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <div 
+                      onClick={navigateToNotifications}
+                      className="p-2 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors border-t border-gray-200 flex items-center justify-center gap-1"
+                    >
+                      <span className="text-sm text-blue-600 font-medium">View All Notifications</span>
+                      <ChevronRight size={16} className="text-blue-600" />
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-8 text-center text-gray-500">
+                    <CheckCircle size={32} className="mx-auto text-gray-300 mb-2" />
+                    <p className="text-sm font-medium">All clear!</p>
+                    <p className="text-xs">No notifications for you</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </>
-        ) : (
-          <div className="p-8 text-center text-gray-500">
-            <CheckCircle size={32} className="mx-auto text-gray-300 mb-2" />
-            <p className="text-sm font-medium">All clear!</p>
-            <p className="text-xs">No notifications for you</p>
           </div>
-        )}
-      </div>
-    </div>
-  </div>
         )}
       </div>
 

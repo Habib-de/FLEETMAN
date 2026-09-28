@@ -16,6 +16,8 @@ import {
   checklistService
 } from '../../services/api';
 import webSocketService from '../../services/websocket';
+import DriverReportModal from '../../components/common/DriverReportModal';
+import { eventBus, EVENTS } from '../../services/eventBus';
 
 // ============================================
 // DYNAMIC LOCATION NAME CACHE
@@ -133,6 +135,11 @@ const CurrentTrip = () => {
   const [showChecklistConfirm, setShowChecklistConfirm] = useState(false);
   const [checklistConfirmMessage, setChecklistConfirmMessage] = useState('');
   const [pendingVehicleId, setPendingVehicleId] = useState(null);
+  const [scheduledTrips, setScheduledTrips] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeAlert, setActiveAlert] = useState(null);
+  const [acknowledging, setAcknowledging] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   
   const isFirstLoad = useRef(true);
   const reconnectIntervalRef = useRef(null);
@@ -629,6 +636,54 @@ const handleTripUpdate = (data) => {
     }
   };
 
+    // ============================================
+  // ✅ LOAD SCHEDULED TRIPS (from Dispatch)
+  // ============================================
+  const loadScheduledTrips = async () => {
+    if (!currentUser?.tenantId) return;
+    
+    try {
+      const tripsRes = await tripService.getAll(currentUser.tenantId);
+      if (tripsRes?.success && tripsRes?.data) {
+        const allTrips = Array.isArray(tripsRes.data) ? tripsRes.data : [tripsRes.data];
+        
+        // Get driver's own ID
+        const myDriverId = driverInfo?.id || currentUser?.driverId;
+        const myUserId = currentUser?.id;
+        const myName = currentUser?.name;
+        
+        // Filter: planned trips assigned to THIS driver
+        const planned = allTrips.filter(t => {
+          const status = (t.status || '').toLowerCase();
+          if (status !== 'planned' && status !== 'scheduled') return false;
+          
+          const tripDriverId = t.driverId || t.driver_id || t.driver?.id;
+          const tripDriverName = t.driverName || t.driver_name;
+          
+          return (
+            (myDriverId && String(tripDriverId) === String(myDriverId)) ||
+            (myUserId && String(tripDriverId) === String(myUserId)) ||
+            (myName && tripDriverName === myName)
+          );
+        });
+        
+        // Sort by start time (earliest first)
+        const sorted = planned.sort((a, b) => {
+          const aTime = new Date(a.startTime || a.start_time || a.plannedStart || 0);
+          const bTime = new Date(b.startTime || b.start_time || b.plannedStart || 0);
+          return aTime - bTime;
+        });
+        
+        setScheduledTrips(sorted);
+        console.log(`📅 Loaded ${sorted.length} scheduled trips for driver`);
+      }
+    } catch (error) {
+      console.warn('Could not load scheduled trips:', error.message);
+      setScheduledTrips([]);
+    }
+  };
+
+
   // ============================================
   // LOAD TRIPS
   // ============================================
@@ -654,10 +709,39 @@ const handleTripUpdate = (data) => {
           startLocation: trip.startLocation || trip.start_location || trip.from || 'Unknown Start',
           endLocation: trip.endLocation || trip.end_location || trip.to || 'Unknown Destination',
           distance: trip.distance || 0,
-          duration: trip.duration || 'N/A',
+          duration: trip.duration || (() => {
+  const start = trip.startTime || trip.start_time;
+  const end = trip.endTime || trip.end_time;
+  if (!start || !end) return 'N/A';
+  try {
+    const diffMs = new Date(end) - new Date(start);
+    if (diffMs <= 0) return 'N/A';
+    const totalSec = Math.floor(diffMs / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  } catch {
+    return 'N/A';
+  }
+})(),
           fuelUsed: trip.fuelUsed || trip.fuel_used || 0,
           fuel: trip.fuel || trip.fuelUsed || 0,
-          efficiency: trip.efficiency || 'N/A',
+          efficiency: (() => {
+  // Use backend efficiency if valid
+  if (trip.efficiency && trip.efficiency !== 'N/A' && !isNaN(parseFloat(trip.efficiency))) {
+    return parseFloat(trip.efficiency).toFixed(1);
+  }
+  // Otherwise compute from distance + fuelUsed
+  const dist = parseFloat(trip.distance) || 0;
+  const fuel = parseFloat(trip.fuelUsed || trip.fuel_used) || 0;
+  if (dist > 0 && fuel > 0) {
+    return ((fuel / dist) * 100).toFixed(1);   // L/100km
+  }
+  return 'N/A';
+})(),
           status: trip.status || 'Completed',
           startOdometer: trip.startOdometer || trip.start_odometer || 0,
           endOdometer: trip.endOdometer || trip.end_odometer || 0,
@@ -1044,32 +1128,26 @@ const handleTripUpdate = (data) => {
 
       console.log('📍 Starting planned trip:', { startLocation, endLocation, geofenceName });
 
-      const newTrip = await startTrip(vehicleId, currentUser?.name || 'Driver', {
-        from: startLocation,
-        to: endLocation,
-        destination: endLocation,
-        geofenceId: selectedRoute?.id || trip.geofenceId,
-        geofenceName: geofenceName,
-        routePoints: routePoints,
+            // ✅ Only UPDATE the existing planned trip — do NOT create a new one
+      const updateData = {
+        status: 'In Progress',
+        startLocation: startLocation,
+        endLocation: endLocation,
         purpose: purpose,
-        startOdometer: assignedVehicle.mileage || '0 km',
-        vehicleName: assignedVehicle.registration || assignedVehicle.reg || 'Unknown'
-      });
-      
-      if (newTrip) {
+        startTime: new Date().toISOString(),
+        geofence: (selectedRoute?.id || trip.geofenceId)
+          ? { id: selectedRoute?.id || trip.geofenceId }
+          : null
+      };
+
+      const result = await tripService.update(trip.id, updateData);
+
+      if (result?.success) {
         tripEndedRef.current = false;
-        const updateData = { 
-          ...trip, 
-          status: 'In Progress',
-          startLocation: startLocation,
-          endLocation: endLocation,
-          purpose: purpose
-        };
-        
-        await updateTrip(trip.id, updateData);
+        await syncActiveTrips();
         await loadTrips();
         setIsTripActive(true);
-        setActiveTripId(newTrip.id || trip.id);
+        setActiveTripId(trip.id);
         setTripDuration(0);
         setTripProgress('0%');
         setCurrentLocation('Starting...');
@@ -1152,6 +1230,28 @@ const handleEndTrip = async () => {
   }
 };
 
+const handleAcknowledgeAlert = async () => {
+  if (!activeAlert) return;
+  setAcknowledging(true);
+  try {
+    const { notificationService } = await import('../../services/api');
+    await notificationService.markAsRead(activeAlert.id);
+    console.log('✅ Alert acknowledged:', activeAlert.id);
+    setActiveAlert(null);
+    setSuccessMessage('✅ Alert acknowledged');
+    setTimeout(() => setSuccessMessage(''), 3000);
+  } catch (e) {
+    console.error('Failed to acknowledge alert:', e);
+    setErrorMessage('Failed to acknowledge. Please try again.');
+  } finally {
+    setAcknowledging(false);
+  }
+};
+
+const handleDismissAlert = () => {
+  setActiveAlert(null);
+};
+
   // ============================================
   // TRIP LOGIC
   // ============================================
@@ -1211,6 +1311,7 @@ const handleEndTrip = async () => {
       const initialize = async () => {
         await loadDriverData();
         await loadTrips();
+        await loadScheduledTrips();
         await loadDestinations();
         
         if (isFirstLoad.current) {
@@ -1265,6 +1366,154 @@ const handleEndTrip = async () => {
 
     return () => clearInterval(intervalId);
   }, [isWebSocketConnected]);
+
+    // ============================================
+  // ✅ LISTEN FOR DISPATCH ASSIGNMENTS
+  // ============================================
+  useEffect(() => {
+    const handleTripAssigned = () => {
+      console.log('🔄 Dispatch updated, reloading scheduled trips...');
+      loadScheduledTrips();
+    };
+    
+    const unsub = eventBus.on(EVENTS.TRIP_UPDATED, handleTripAssigned);
+    const unsub2 = eventBus.on(EVENTS.TRIP_STARTED, handleTripAssigned);
+    
+    return () => {
+      unsub();
+      unsub2();
+    };
+  }, [driverInfo]);
+
+  // ============================================
+// ✅ LISTEN FOR MANAGER ALERTS
+// ============================================
+useEffect(() => {
+  const handleNewNotification = (event) => {
+    const notif = event.detail;
+    if (!notif) return;
+
+        const type = notif.type || '';
+
+    // ---- Manager replied to our driver report ----
+    if (type.startsWith('driver_report_reply_')) {
+      setActiveAlert({
+        id: notif.id,
+        code: 'MESSAGE',
+        title: '💬 Manager replied',
+        message: notif.message || '',
+        createdAt: notif.createdAt || new Date().toISOString(),
+      });
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = 660;
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.35);
+      } catch (e) { /* silent */ }
+      return;
+    }
+
+    // ---- Manager acknowledged our driver report ----
+    if (type.startsWith('driver_report_ack_')) {
+      setSuccessMessage(`✅ Manager acknowledged: ${notif.message || 'Your report was received'}`);
+      setTimeout(() => setSuccessMessage(''), 6000);
+      return;
+    }
+
+    // ---- Manager resolved our driver report ----
+    if (type.startsWith('driver_report_resolved_')) {
+      setSuccessMessage(`✅ Manager resolved: ${notif.message || 'Your report has been resolved'}`);
+      setTimeout(() => setSuccessMessage(''), 6000);
+      return;
+    }
+
+    // ---- Manager alerts (existing behavior) ----
+    if (!type.startsWith('manager_alert_')) return;
+
+    const alertCode = type.replace('manager_alert_', '');
+    console.log('🚨 Manager alert received:', alertCode, notif);
+
+    setActiveAlert({
+      id: notif.id,
+      code: alertCode,
+      title: notif.title || 'Alert',
+      message: notif.message || '',
+      createdAt: notif.createdAt || new Date().toISOString(),
+    });
+
+    // Beep for high-severity alerts
+    if (['STOP_VEHICLE', 'DANGER_AHEAD', 'ABORT_TRIP', 'CALL_DISPATCH'].includes(alertCode)) {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+      } catch (e) { /* silent */ }
+    }
+  };
+
+  window.addEventListener('newNotification', handleNewNotification);
+
+  // Also fetch existing unread manager alerts on mount
+  const checkExistingAlerts = async () => {
+    if (!currentUser?.id) return;
+    try {
+      const { notificationService } = await import('../../services/api');
+      const res = await notificationService.getUnread(currentUser.id);
+      const notifications = res?.data || [];
+            // Priority 1: unanswered manager replies to driver reports
+      const reportReplies = notifications.filter(n =>
+        n.type && n.type.startsWith('driver_report_reply_')
+      );
+      if (reportReplies.length > 0) {
+        const latest = reportReplies[0];
+        setActiveAlert({
+          id: latest.id,
+          code: 'MESSAGE',
+          title: '💬 Manager replied',
+          message: latest.message || '',
+          createdAt: latest.createdAt || new Date().toISOString(),
+        });
+        return;
+      }
+
+      // Priority 2: manager alerts (existing behavior)
+      const managerAlerts = notifications.filter(n =>
+        n.type && n.type.startsWith('manager_alert_')
+      );
+      if (managerAlerts.length > 0) {
+        const latest = managerAlerts[0];
+        setActiveAlert({
+          id: latest.id,
+          code: latest.type.replace('manager_alert_', ''),
+          title: latest.title || 'Alert',
+          message: latest.message || '',
+          createdAt: latest.createdAt || new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      console.warn('Could not check existing alerts:', e);
+    }
+  };
+
+  checkExistingAlerts();
+
+  return () => {
+    window.removeEventListener('newNotification', handleNewNotification);
+  };
+}, [currentUser?.id]);
 
   // ============================================
 // WATCH FOR TRIP COMPLETION - AUTO RESET
@@ -1332,8 +1581,80 @@ useEffect(() => {
   // ✅ Check if vehicle can trip for button state - NO setErrorMessage() here!
   const vehicleCanTrip = canVehicleTrip();
 
+  const filteredTrips = trips.filter(trip => {
+  if (!searchTerm) return true;
+  const q = searchTerm.toLowerCase();
   return (
-    <div className="space-y-6">
+    (trip.from || '').toLowerCase().includes(q) ||
+    (trip.to || '').toLowerCase().includes(q) ||
+    (trip.purpose || '').toLowerCase().includes(q) ||
+    (trip.status || '').toLowerCase().includes(q) ||
+    (trip.vehicleName || '').toLowerCase().includes(q) ||
+    (trip.date || '').toLowerCase().includes(q)
+  );
+});
+
+  return (
+    <div className="space-y-3 md:space-y-6">
+      {/* ============================================ */}
+{/* 🚨 MANAGER ALERT BANNER */}
+{/* ============================================ */}
+{activeAlert && (
+  <div
+    className={`rounded-xl p-4 shadow-lg border-2 ${
+      ['STOP_VEHICLE', 'DANGER_AHEAD', 'ABORT_TRIP', 'CALL_DISPATCH'].includes(activeAlert.code)
+        ? 'bg-red-50 border-red-500 text-red-900 animate-pulse'
+        : ['SLOW_DOWN', 'WRONG_ROUTE', 'RETURN_TO_DEPOT'].includes(activeAlert.code)
+          ? 'bg-yellow-50 border-yellow-500 text-yellow-900'
+          : 'bg-blue-50 border-blue-500 text-blue-900'
+    }`}
+  >
+    <div className="flex flex-wrap items-start gap-3">
+      <div className="flex-shrink-0 text-3xl">
+        {activeAlert.code === 'STOP_VEHICLE' && '🛑'}
+        {activeAlert.code === 'SLOW_DOWN' && '⚠️'}
+        {activeAlert.code === 'MESSAGE' && '💬'}
+        {activeAlert.code === 'WRONG_ROUTE' && '📍'}
+        {activeAlert.code === 'RETURN_TO_DEPOT' && '⏱️'}
+        {activeAlert.code === 'TAKE_BREAK' && '☕'}
+        {activeAlert.code === 'DANGER_AHEAD' && '🚨'}
+        {activeAlert.code === 'CALL_DISPATCH' && '📞'}
+        {activeAlert.code === 'ABORT_TRIP' && '🚫'}
+        {activeAlert.code === 'ACKNOWLEDGE' && '✅'}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-wider opacity-70 font-semibold">
+          Alert from Fleet Manager
+        </p>
+        <h3 className="text-lg font-bold">{activeAlert.title}</h3>
+        <p className="text-sm mt-1 whitespace-pre-line">{activeAlert.message}</p>
+        <p className="text-[10px] opacity-60 mt-1">
+          {new Date(activeAlert.createdAt).toLocaleTimeString()}
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 flex-shrink-0">
+        <button
+          onClick={handleAcknowledgeAlert}
+          disabled={acknowledging}
+          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5"
+        >
+          {acknowledging ? (
+            <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div>
+          ) : (
+            <Check size={14} />
+          )}
+          Acknowledge
+        </button>
+        <button
+          onClick={handleDismissAlert}
+          className="px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-white/50 rounded-lg"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {successMessage && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-700 text-sm flex items-center gap-2 whitespace-pre-line">
           <Check size={16} className="flex-shrink-0" /> {successMessage}
@@ -1344,6 +1665,131 @@ useEffect(() => {
           <AlertCircle size={16} className="flex-shrink-0" /> {errorMessage}
         </div>
       )}
+
+            {/* ============================================ */}
+      {/* ✅ SCHEDULED TRIPS FROM DISPATCH */}
+      {/* ============================================ */}
+      {scheduledTrips.length > 0 && !isTripActive && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-blue-900 flex items-center gap-2">
+              <Calendar size={18} className="text-blue-600" />
+              Your Scheduled Trips
+              <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">
+                {scheduledTrips.length}
+              </span>
+            </h3>
+          </div>
+          
+                    <div className="space-y-2">
+            {scheduledTrips.map((trip) => {
+              const startTime = trip.startTime || trip.start_time || trip.plannedStart;
+              const cleanStartTime = startTime ? startTime.replace(/Z$/, '').replace(/[+-]\d{2}:?\d{2}$/, '') : null;
+              
+              const scheduledDate = cleanStartTime ? new Date(cleanStartTime) : null;
+              const now = new Date();
+              
+              const isToday = scheduledDate && scheduledDate.toDateString() === now.toDateString();
+              const isOverdue = scheduledDate && scheduledDate < now && !isToday;
+              
+              // ✅ NEW: Can the trip be started now?
+              const canStartNow = scheduledDate ? scheduledDate <= now : true;   // If no time set, allow start
+              const timeUntilStart = scheduledDate && scheduledDate > now
+                ? Math.ceil((scheduledDate - now) / (1000 * 60))   // minutes
+                : 0;
+              
+              return (
+                <div 
+                  key={trip.id} 
+                  className={`bg-white p-3 rounded-lg border-2 flex flex-wrap items-center justify-between gap-3 ${
+                    isToday ? 'border-blue-400 shadow-md' : 'border-gray-200'
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isToday && (
+                        <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold">
+                          TODAY
+                        </span>
+                      )}
+                      {isOverdue && (
+                        <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse">
+                          ⏰ OVERDUE
+                        </span>
+                      )}
+                      {trip.priority === 'urgent' && (
+                        <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
+                          🚨 URGENT
+                        </span>
+                      )}
+                      {trip.priority === 'high' && (
+                        <span className="text-[10px] bg-orange-500 text-white px-2 py-0.5 rounded-full font-bold">
+                          HIGH
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-500 flex items-center gap-1">
+                        <Clock size={12} />
+                        {startTime 
+  ? new Date(startTime.replace(/Z$/, '').replace(/[+-]\d{2}:?\d{2}$/, '')).toLocaleString()
+  : 'No time set'
+}
+                      </span>
+                    </div>
+                    
+                                        <div className="mt-0.5 sm:mt-1 font-medium text-gray-800 flex items-center gap-1 text-xs sm:text-sm">
+                      <MapPin size={11} className="sm:w-[14px] sm:h-[14px] text-blue-600 flex-shrink-0" />
+                      <span className="truncate">{trip.startLocation || 'Start'}</span>
+                      <span className="text-gray-400">→</span>
+                      <span className="truncate">{trip.endLocation || 'Destination'}</span>
+                    </div>
+                    
+                    {trip.purpose && (
+                      <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 truncate">
+                        📋 {trip.purpose}
+                      </div>
+                    )}
+                    
+                    {/* {trip.purpose && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        📋 {trip.purpose}
+                      </div>
+                    )} */}
+                  </div>
+                  
+                                                      <button
+                    onClick={() => handleStartPlannedTrip({
+                      id: trip.id,
+                      from: trip.startLocation,
+                      to: trip.endLocation,
+                      purpose: trip.purpose,
+                      geofenceId: trip.geofenceId || trip.geofence_id,
+                      routeName: trip.geofenceName || trip.geofence_name
+                    })}
+                    disabled={!vehicleCanTrip || !canStartNow}
+                    className={`px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium flex items-center gap-1 sm:gap-1.5 transition-all whitespace-nowrap flex-shrink-0 ${
+                      !vehicleCanTrip || !canStartNow
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-green-600 text-white hover:bg-green-700 hover:scale-105'
+                    }`}
+                  >
+                    <PlayCircle size={12} className="sm:w-4 sm:h-4 flex-shrink-0" />
+                    {!vehicleCanTrip 
+                      ? 'Unavailable' 
+                      : !canStartNow 
+                        ? `Starts in ${timeUntilStart}min` 
+                        : 'Start'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          
+          <p className="text-[10px] text-blue-600 mt-2 text-center">
+            💡 These trips were scheduled by your fleet manager
+          </p>
+        </div>
+      )}
+
 
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -1369,6 +1815,32 @@ useEffect(() => {
           <RefreshCw size={14} />
           Refresh
         </button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-2 md:gap-4">
+                {[
+          { label: 'Trips', value: trips.length, icon: Navigation, color: 'blue' },
+          { label: 'Distance', value: calculateTotalDistance(trips), icon: MapPin, color: 'green' },
+          { label: 'Efficiency', value: calculateAvgEfficiency(trips), icon: Fuel, color: 'yellow' },
+          { label: 'Duration', value: calculateTotalDuration(trips), icon: Clock, color: 'purple' },
+        ].map((stat, i) => (
+          <div key={i} className="bg-white px-2 py-1 md:p-4 rounded-xl shadow-sm border border-gray-200 min-w-0">
+            <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3">
+              <div className={`p-1 md:p-2 bg-${stat.color}-50 rounded-lg text-${stat.color}-600 w-fit`}>
+                <stat.icon size={12} className="md:w-[18px] md:h-[18px]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[9px] md:text-xs text-gray-500 truncate leading-tight">
+                  {stat.label}
+                </p>
+                <p className="text-[11px] md:text-lg font-bold truncate leading-tight">
+                  {stat.value}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
@@ -1525,11 +1997,12 @@ useEffect(() => {
                 <Play size={18} /> 
                 {!vehicleCanTrip ? '🚫 Vehicle Unavailable' : 'Start Trip'}
               </button>
-              <button 
-                onClick={() => setShowAddModal(true)}
-                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center justify-center gap-2 transition-all hover:scale-105"
+                <button 
+                onClick={() => setShowReportModal(true)}
+                disabled={!assignedVehicle}
+                className="flex-1 bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 flex items-center justify-center gap-2 transition-all hover:scale-105 disabled:bg-gray-300"
               >
-                <Plus size={18} /> Log Previous Trip
+                <AlertTriangle size={18} /> Report to Manager
               </button>
             </>
           ) : (
@@ -1540,8 +2013,11 @@ useEffect(() => {
               >
                 <StopCircle size={18} /> End Trip
               </button>
-              <button className="flex-1 bg-yellow-500 text-white py-3 rounded-lg font-semibold hover:bg-yellow-600 flex items-center justify-center gap-2 transition-all hover:scale-105">
-                <AlertTriangle size={18} /> Report Issue
+              <button 
+                onClick={() => setShowReportModal(true)}
+                className="flex-1 bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 flex items-center justify-center gap-2 transition-all hover:scale-105"
+              >
+                <AlertTriangle size={18} /> Report to Manager
               </button>
             </>
           )}
@@ -1550,28 +2026,69 @@ useEffect(() => {
 
       {/* Trip History */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-semibold text-lg flex items-center gap-2">
-            <Clock size={20} className="text-blue-600" />
-            Trip History
-            <span className="text-xs text-gray-400 font-normal">({trips.length} trips)</span>
-          </h3>
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2"
-          >
-            <Plus size={16} /> Add Trip
-          </button>
-        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+  <h3 className="font-semibold text-lg flex items-center gap-2">
+    <Clock size={20} className="text-blue-600" />
+    Trip History
+    <span className="text-xs text-gray-400 font-normal">
+  ({filteredTrips.length}{searchTerm ? ` of ${trips.length}` : ''} trips)
+</span>
+  </h3>
+  <div className="relative w-full sm:w-72">
+    <input
+      type="text"
+      placeholder="Search trips..."
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+      className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+    />
+    <svg
+      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+    {searchTerm && (
+      <button
+        onClick={() => setSearchTerm('')}
+        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-100 rounded"
+      >
+        <X size={12} className="text-gray-400" />
+      </button>
+    )}
+  </div>
+</div>
 
         <div className="space-y-3">
-          {trips.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <p>No trips recorded yet</p>
-              <p className="text-sm">Click "Add Trip" to log your first trip</p>
-            </div>
-          ) : (
-            trips.map((trip) => (
+          {filteredTrips.length === 0 ? (
+  <div className="text-center py-8 text-gray-400">
+    {searchTerm ? (
+      <>
+        <p>No trips match "{searchTerm}"</p>
+        <button
+          onClick={() => setSearchTerm('')}
+          className="text-sm text-blue-600 hover:underline mt-2"
+        >
+          Clear search
+        </button>
+      </>
+    ) : (
+      <>
+        <p>No trips recorded yet</p>
+        <p className="text-sm">Your trips will appear here</p>
+      </>
+    )}
+  </div>
+) : (
+  filteredTrips.map((trip) => (
               <div key={trip.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border-l-4 border-l-transparent">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1601,9 +2118,9 @@ useEffect(() => {
                     <span><Clock size={12} className="inline mr-1" /> {trip.duration || 'N/A'}</span>
                     <span><Navigation size={12} className="inline mr-1" /> {trip.distance ? `${trip.distance} km` : 'N/A'}</span>
                     <span><Fuel size={12} className="inline mr-1" /> {trip.fuelUsed || trip.fuel || 'N/A'}</span>
-                    {trip.status === 'Completed' && (
+                    {/* {trip.status === 'Completed' && (
                       <span className="text-green-600">✅ Completed</span>
-                    )}
+                    )} */}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mt-2 sm:mt-0">
@@ -1622,13 +2139,13 @@ useEffect(() => {
                     </span>
                   )}
                   
-                  {trip.status === 'Completed' && (
+                  {/* {trip.status === 'Completed' && (
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs flex items-center gap-1">
                       <CheckCircle size={12} /> Done
                     </span>
-                  )}
+                  )} */}
                   
-                  <button 
+                  {/* <button 
                     onClick={() => handleEditClick(trip)}
                     className="p-1 text-blue-600 hover:bg-blue-50 rounded"
                   >
@@ -1639,7 +2156,7 @@ useEffect(() => {
                     className="p-1 text-red-600 hover:bg-red-50 rounded"
                   >
                     <Trash2 size={16} />
-                  </button>
+                  </button> */}
                 </div>
               </div>
             ))
@@ -1687,27 +2204,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Trips', value: trips.length, icon: Navigation, color: 'blue' },
-          { label: 'Total Distance', value: calculateTotalDistance(trips), icon: MapPin, color: 'green' },
-          { label: 'Avg Efficiency', value: calculateAvgEfficiency(trips), icon: Fuel, color: 'yellow' },
-          { label: 'Total Duration', value: calculateTotalDuration(trips), icon: Clock, color: 'purple' },
-        ].map((stat, i) => (
-          <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 bg-${stat.color}-50 rounded-lg text-${stat.color}-600`}>
-                <stat.icon size={18} />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">{stat.label}</p>
-                <p className="text-lg font-bold">{stat.value}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      
 
       {/* Modals */}
       {(showAddModal || editingTrip) && (
@@ -1890,6 +2387,28 @@ useEffect(() => {
           </div>
         </div>
       )}
+
+            {/* ============================================ */}
+      {/* 📣 DRIVER REPORT MODAL (driver → manager) */}
+      {/* ============================================ */}
+      <DriverReportModal
+        vehicle={assignedVehicle ? {
+          id: assignedVehicle.id,
+          reg: assignedVehicle.registration || assignedVehicle.reg,
+          registration: assignedVehicle.registration,
+          driver: driverInfo?.name || currentUser?.name,
+        } : null}
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSent={(data) => {
+          setSuccessMessage(`✅ Report sent: ${data?.title || 'Report'} — manager notified`);
+          setTimeout(() => setSuccessMessage(''), 4000);
+          eventBus.emit(EVENTS.DRIVER_REPORT_SENT || 'driverReport:sent', data);
+        }}
+        currentLat={assignedVehicle?.lat || null}
+        currentLng={assignedVehicle?.lng || null}
+        currentSpeed={currentSpeed || 0}
+      />
     </div>
   );
 };

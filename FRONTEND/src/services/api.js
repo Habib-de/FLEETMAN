@@ -979,6 +979,55 @@ export const notificationService = {
 };
 
 // ============================================
+// ALERT SERVICES  (manager → driver)
+// ============================================
+export const alertService = {
+  send: async (vehicleId, alertType, message, senderName) => {
+    const response = await apiCall('/alerts/send', 'POST', {
+      vehicleId,
+      alertType,
+      message,
+      senderName,
+    });
+    return response;
+  },
+};
+
+
+// ============================================
+// DRIVER REPORT SERVICES  (driver → manager)
+// ============================================
+export const driverReportService = {
+  send: async ({ vehicleId, driverId, reportType, message, lat, lng, speed }) => {
+    const response = await apiCall('/alerts/report', 'POST', {
+      vehicleId,
+      driverId: driverId || null,
+      reportType,
+      message: message || '',
+      lat: lat || null,
+      lng: lng || null,
+      speed: speed || 0,
+    });
+    return response;
+  },
+
+  // Manager acknowledges a driver report (marks the notification as read)
+  acknowledge: async (notificationId) => {
+    const response = await apiCall(`/notifications/${notificationId}/read`, 'PUT');
+    return response;
+  },
+
+  // Manager replies to a driver report
+  reply: async (notificationId, message, driverUserId = null) => {
+    const response = await apiCall(`/notifications/${notificationId}/reply`, 'POST', {
+      message,
+      driverUserId,
+    });
+    return response;
+  },
+};
+
+// ============================================
 // AUDIT LOG SERVICES - Add this section
 // ============================================
 
@@ -1037,5 +1086,7 @@ export default {
   poolBooking: poolBookingService,
   checklist: checklistService,
   notification: notificationService,
+  alert: alertService,
+  driverReport: driverReportService,
   auditLog: auditLogService,
 };
