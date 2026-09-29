@@ -11,6 +11,8 @@ import com.fleetman.repository.TrackingDataRepository;
 import com.fleetman.repository.VehicleRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,12 +22,14 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TrackingDataService {
     
     private final TrackingDataRepository trackingDataRepository;
     private final TenantRepository tenantRepository;      
     private final VehicleRepository vehicleRepository;    
-    private final DriverRepository driverRepository;      
+    private final DriverRepository driverRepository;
+    private final SafetyService safetyService;      
     
     @Transactional
     public TrackingData saveTrackingData(TrackingDataDTO dto) {
@@ -54,7 +58,21 @@ public class TrackingDataService {
         data.setDriver(driver);
     }
 
-    return trackingDataRepository.save(data);
+        TrackingData saved = trackingDataRepository.save(data);
+
+    // ✅ NEW: Detect safety events by comparing with previous point
+    try {
+        TrackingData previous = trackingDataRepository
+            .findTopByVehicleIdOrderByTimestampDesc(saved.getVehicle().getId());
+        if (previous != null && !previous.getId().equals(saved.getId())) {
+            safetyService.detectAndSaveEvents(saved, previous);
+        }
+    } catch (Exception e) {
+        // Never fail tracking save because of event detection
+        log.warn("Safety event detection failed: {}", e.getMessage());
+    }
+
+    return saved;
     }
     
     public List<TrackingData> getTrackingDataByVehicle(String vehicleId) {

@@ -17,7 +17,8 @@ import {
   vehicleService, 
   driverService,
   tenantService,
-  merchantService
+  merchantService,
+  serviceScheduleService
 } from '../../services/api';
 import { eventBus, EVENTS } from '../../services/eventBus'; 
 
@@ -46,6 +47,23 @@ const Maintenance = ({ setActiveTab }) => {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedVehicleHistory, setSelectedVehicleHistory] = useState(null);
+
+    // ✅ Service Schedule state
+  const [schedules, setSchedules] = useState([]);
+  const [upcomingSchedules, setUpcomingSchedules] = useState([]);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState(null);
+  const [isRunningScheduleCheck, setIsRunningScheduleCheck] = useState(false);
+  const [scheduleFormData, setScheduleFormData] = useState({
+    vehicleId: '',
+    serviceType: '',
+    intervalKm: '',
+    intervalDays: '',
+    lastServiceKm: '',
+    lastServiceDate: '',
+    isActive: true,
+    notes: ''
+  });
   
   // Service Templates
   const serviceTemplates = [
@@ -131,10 +149,33 @@ const Maintenance = ({ setActiveTab }) => {
         setDrivers([]);
       }
 
-      await loadMechanicsFromMerchants();
+            await loadMechanicsFromMerchants();
+
+      // ✅ Load service schedules
+      try {
+        console.log('📡 Fetching service schedules...');
+        const schedulesRes = await serviceScheduleService.getByTenant(tenant);
+        if (schedulesRes?.success && schedulesRes?.data) {
+          setSchedules(schedulesRes.data);
+          console.log('✅ Loaded schedules:', schedulesRes.data.length);
+        } else {
+          setSchedules([]);
+        }
+
+        const upcomingRes = await serviceScheduleService.getUpcoming(tenant, 30);
+        if (upcomingRes?.success && upcomingRes?.data) {
+          setUpcomingSchedules(upcomingRes.data);
+          console.log('✅ Loaded upcoming services:', upcomingRes.data.length);
+        } else {
+          setUpcomingSchedules([]);
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not load service schedules:', err);
+      }
 
     } catch (error) {
       console.error('❌ Error loading maintenance data:', error);
+
       setErrorMessage('Failed to load maintenance data. Please try again.');
     } finally {
       setIsDataLoading(false);
@@ -902,6 +943,416 @@ const handleUpdateStatus = async (jobId, newStatus) => {
       }));
     }
   };
+
+    // ============================================
+  // SERVICE SCHEDULE HANDLERS
+  // ============================================
+  const openScheduleModal = (schedule = null) => {
+    if (schedule) {
+      setEditingSchedule(schedule);
+      setScheduleFormData({
+        vehicleId: schedule.vehicle?.id || schedule.vehicleId || '',
+        serviceType: schedule.serviceType || '',
+        intervalKm: schedule.intervalKm || '',
+        intervalDays: schedule.intervalDays || '',
+        lastServiceKm: schedule.lastServiceKm || '',
+        lastServiceDate: schedule.lastServiceDate || '',
+        isActive: schedule.isActive !== false,
+        notes: schedule.notes || ''
+      });
+    } else {
+      setEditingSchedule(null);
+      setScheduleFormData({
+        vehicleId: '',
+        serviceType: '',
+        intervalKm: '',
+        intervalDays: '',
+        lastServiceKm: '',
+        lastServiceDate: '',
+        isActive: true,
+        notes: ''
+      });
+    }
+    setShowScheduleModal(true);
+  };
+
+  const closeScheduleModal = () => {
+    setShowScheduleModal(false);
+    setEditingSchedule(null);
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!scheduleFormData.vehicleId || !scheduleFormData.serviceType) {
+      setErrorMessage('Vehicle and service type are required');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      const payload = {
+        tenant: { id: tenantId },
+        vehicle: { id: scheduleFormData.vehicleId },
+        serviceType: scheduleFormData.serviceType,
+        intervalKm: scheduleFormData.intervalKm ? parseFloat(scheduleFormData.intervalKm) : null,
+        intervalDays: scheduleFormData.intervalDays ? parseInt(scheduleFormData.intervalDays) : null,
+        lastServiceKm: scheduleFormData.lastServiceKm ? parseFloat(scheduleFormData.lastServiceKm) : null,
+        lastServiceDate: scheduleFormData.lastServiceDate || null,
+        isActive: scheduleFormData.isActive,
+        notes: scheduleFormData.notes || null
+      };
+
+      let response;
+      if (editingSchedule) {
+        response = await serviceScheduleService.update(editingSchedule.id, payload);
+      } else {
+        response = await serviceScheduleService.create(payload);
+      }
+
+      if (response?.success) {
+        setSuccessMessage(editingSchedule ? '✅ Schedule updated' : '✅ Schedule created');
+        closeScheduleModal();
+        await loadData();
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else {
+        setErrorMessage(response?.message || 'Failed to save schedule');
+      }
+    } catch (err) {
+      console.error('Error saving schedule:', err);
+      setErrorMessage('Failed to save schedule');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteSchedule = async (schedule) => {
+    if (!window.confirm(`Delete schedule for "${schedule.serviceType}"?`)) return;
+    try {
+      const response = await serviceScheduleService.delete(schedule.id);
+      if (response?.success) {
+        setSuccessMessage('✅ Schedule deleted');
+        await loadData();
+        setTimeout(() => setSuccessMessage(''), 3000);
+      }
+    } catch (err) {
+      setErrorMessage('Failed to delete schedule');
+    }
+  };
+
+  const handleRunScheduleCheck = async () => {
+    setIsRunningScheduleCheck(true);
+    try {
+      const response = await serviceScheduleService.runCheckNow();
+      const created = response?.data?.workOrdersCreated ?? 0;
+      setSuccessMessage(`✅ Schedule check complete — ${created} work order(s) created`);
+      await loadData();
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (err) {
+      setErrorMessage('Failed to run schedule check');
+    } finally {
+      setIsRunningScheduleCheck(false);
+    }
+  };
+
+  // ============================================
+  // RENDER SCHEDULES VIEW
+  // ============================================
+  const renderSchedulesView = () => (
+    <div className="space-y-4">
+      {/* Upcoming */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 sm:border-2 rounded-lg sm:rounded-xl p-2 sm:p-4">
+                <div className="flex items-center justify-between gap-2 mb-2 sm:mb-3">
+                    <h4 className="font-semibold text-xs sm:text-sm flex items-center gap-1 sm:gap-2 text-blue-900 min-w-0">
+            <Clock size={13} className="sm:w-4 sm:h-4 text-blue-600 flex-shrink-0" />
+            <span className="truncate">Upcoming Services</span>
+            <span className="text-[10px] sm:text-xs bg-blue-200 text-blue-800 px-1.5 sm:px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0">
+              {upcomingSchedules.length} due in 30 days
+            </span>
+          </h4>
+                              <button
+            onClick={handleRunScheduleCheck}
+            disabled={isRunningScheduleCheck}
+            className="text-[10px] sm:text-xs bg-blue-600 text-white px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+          >
+            <RefreshCw size={11} className={`sm:w-3 sm:h-3 ${isRunningScheduleCheck ? 'animate-spin' : ''}`} />
+            {isRunningScheduleCheck ? 'Running...' : 'Run Check Now'}
+          </button>
+        </div>
+
+        {upcomingSchedules.length === 0 ? (
+                    <p className="text-xs sm:text-sm text-blue-600 text-center py-2 sm:py-4">
+            ✅ No services due in the next 30 days
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {upcomingSchedules.map((item) => {
+              const isOverdue = (item.kmRemaining != null && item.kmRemaining < 0) ||
+                                (item.daysRemaining != null && item.daysRemaining < 0);
+              const isUrgent = item.dueNow;
+              return (
+                <div
+                  key={item.scheduleId}
+                  className={`flex items-center justify-between p-3 rounded-lg border-l-4 bg-white ${
+                    isOverdue ? 'border-red-500' : isUrgent ? 'border-orange-500' : 'border-yellow-500'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{item.vehicleRegistration}</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                        {item.serviceType}
+                      </span>
+                      {isOverdue && (
+                        <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full animate-pulse">
+                          ⚠️ OVERDUE
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-500">
+                      {item.kmRemaining != null && (
+                        <span>
+                          {item.kmRemaining < 0 ? '🔴 Overdue by ' : '📏 Due in '}
+                          {Math.abs(item.kmRemaining).toFixed(0)} km
+                        </span>
+                      )}
+                      {item.daysRemaining != null && (
+                        <span>
+                          {item.daysRemaining < 0 ? '🔴 Overdue by ' : '⏱️ Due in '}
+                          {Math.abs(item.daysRemaining)} days
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* All schedules */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="font-semibold text-sm flex items-center gap-2">
+            <ClipboardList size={16} className="text-blue-600" />
+            All Schedules ({schedules.length})
+          </h4>
+          <button
+            onClick={() => openScheduleModal()}
+            className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 flex items-center gap-1"
+          >
+            <Plus size={12} /> Add Schedule
+          </button>
+        </div>
+
+        {schedules.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            <Clock size={48} className="mx-auto text-gray-300 mb-3" />
+            <p className="font-medium">No service schedules yet</p>
+            <p className="text-sm">Add a schedule to auto-create maintenance jobs</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {schedules.map((schedule) => {
+  const vehicleReg =
+    schedule.vehicleRegistration ||
+    vehicles.find(v => v.id === schedule.vehicleId)?.registration ||
+    'Unknown';
+  return (
+                <div key={schedule.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{vehicleReg}</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                        {schedule.serviceType}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                        schedule.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                      }`}>
+                        {schedule.isActive ? '✅ Active' : '⏸️ Inactive'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-500">
+                      {schedule.intervalKm && <span>Every {schedule.intervalKm} km</span>}
+                      {schedule.intervalDays && <span>Every {schedule.intervalDays} days</span>}
+                      {schedule.lastServiceKm && <span>Last at {schedule.lastServiceKm} km</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 ml-2">
+                    <button
+                      onClick={() => openScheduleModal(schedule)}
+                      className="p-1.5 hover:bg-blue-100 rounded text-blue-600"
+                      title="Edit"
+                    >
+                      <Edit size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSchedule(schedule)}
+                      className="p-1.5 hover:bg-red-100 rounded text-red-600"
+                      title="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Schedule modal */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={closeScheduleModal}></div>
+          <div className="relative bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={closeScheduleModal}
+              className="absolute top-4 right-4 p-1.5 hover:bg-gray-100 rounded-lg z-10"
+            >
+              <X size={20} className="text-gray-500" />
+            </button>
+
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 rounded-t-2xl">
+              <h2 className="text-lg font-bold text-white">
+                {editingSchedule ? 'Edit Schedule' : 'New Service Schedule'}
+              </h2>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle *</label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                  value={scheduleFormData.vehicleId}
+                  onChange={(e) => setScheduleFormData({...scheduleFormData, vehicleId: e.target.value})}
+                  disabled={!!editingSchedule}
+                >
+                  <option value="">Select vehicle</option>
+                  {vehicles.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.registration || v.reg || v.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Service Type *</label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                  value={scheduleFormData.serviceType}
+                  onChange={(e) => setScheduleFormData({...scheduleFormData, serviceType: e.target.value})}
+                >
+                  <option value="">Select service type</option>
+                  <option value="Oil Change">Oil Change</option>
+                  <option value="Brake Service">Brake Service</option>
+                  <option value="Tire Rotation">Tire Rotation</option>
+                  <option value="Engine Tune-up">Engine Tune-up</option>
+                  <option value="Transmission Service">Transmission Service</option>
+                  <option value="Cooling System Flush">Cooling System Flush</option>
+                  <option value="AC Service">AC Service</option>
+                  <option value="General Inspection">General Inspection</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Every X km</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                    placeholder="10000"
+                    value={scheduleFormData.intervalKm}
+                    onChange={(e) => setScheduleFormData({...scheduleFormData, intervalKm: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Every X days</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                    placeholder="180"
+                    value={scheduleFormData.intervalDays}
+                    onChange={(e) => setScheduleFormData({...scheduleFormData, intervalDays: e.target.value})}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">Fill at least one. Schedule fires on whichever hits first.</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Last service km</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                    placeholder="45000"
+                    value={scheduleFormData.lastServiceKm}
+                    onChange={(e) => setScheduleFormData({...scheduleFormData, lastServiceKm: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Last service date</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                    value={scheduleFormData.lastServiceDate}
+                    onChange={(e) => setScheduleFormData({...scheduleFormData, lastServiceDate: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="schedule-active"
+                  checked={scheduleFormData.isActive}
+                  onChange={(e) => setScheduleFormData({...scheduleFormData, isActive: e.target.checked})}
+                />
+                <label htmlFor="schedule-active" className="text-sm text-gray-700">
+                  Active (scheduler will check this schedule)
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg"
+                  placeholder="Optional notes..."
+                  value={scheduleFormData.notes}
+                  onChange={(e) => setScheduleFormData({...scheduleFormData, notes: e.target.value})}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4 border-t border-gray-200">
+                <button
+                  onClick={handleSaveSchedule}
+                  disabled={isLoading}
+                  className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isLoading ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  ) : (
+                    <Save size={16} />
+                  )}
+                  {editingSchedule ? 'Update' : 'Create Schedule'}
+                </button>
+                <button
+                  onClick={closeScheduleModal}
+                  className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // ============================================
   // RENDER ENHANCED KANBAN VIEW
@@ -1730,54 +2181,76 @@ const handleUpdateStatus = async (jobId, newStatus) => {
         </div>
       )}
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-          <div>
-            <h3 className="text-lg sm:text-xl font-semibold flex items-center gap-2">
-              <Wrench className="text-blue-600" />
-              Maintenance Management
-            </h3>
-            <p className="text-sm text-gray-500 mt-1">Track and manage all vehicle maintenance activities</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <button 
-              onClick={loadData}
-              className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-              title="Refresh data"
-            >
-              <RefreshCw size={18} className="hover:rotate-180 transition-transform duration-500" />
-            </button>
-            <div className="flex bg-gray-100 rounded-lg p-1">
-              <button 
-                onClick={() => setViewMode('kanban')}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center gap-1 ${viewMode === 'kanban' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
-              >
-                <ClipboardList size={14} /> Kanban
-              </button>
-              <button 
-                onClick={() => setViewMode('calendar')}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center gap-1 ${viewMode === 'calendar' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
-              >
-                <Calendar size={14} /> Calendar
-              </button>
-              <button 
-                onClick={() => setViewMode('analytics')}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center gap-1 ${viewMode === 'analytics' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
-              >
-                <BarChart3 size={14} /> Analytics
-              </button>
-            </div>
-            
-<button 
-  onClick={() => setShowNewJobForm(true)}
-  className="bg-blue-600 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm hover:bg-blue-700 flex items-center gap-1 sm:gap-2 transition-colors flex-shrink-0 whitespace-nowrap"
->
-  <Plus size={14} className="sm:w-4 sm:h-4" />
-  <span>New Job</span>
-</button>
-          </div>
-        </div>
+      <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200">
+  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+
+    {/* Line 1 on phone: title + subtitle on the left, refresh on the right */}
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <h3 className="text-lg sm:text-xl font-semibold flex items-center gap-2">
+          <Wrench className="text-blue-600" />
+          Maintenance Management
+        </h3>
+        <p className="text-xs sm:text-sm text-gray-500 mt-1">Track and manage all vehicle maintenance activities</p>
       </div>
+
+      {/* Refresh: phone only (top right of line 1) */}
+      <button
+        onClick={loadData}
+        className="sm:hidden p-1.5 text-gray-400 hover:text-blue-600 transition-colors flex-shrink-0"
+        title="Refresh data"
+      >
+        <RefreshCw size={18} />
+      </button>
+    </div>
+
+    {/* Line 2 on phone: tabs + New Job. On desktop: refresh + tabs + New Job as before */}
+    <div className="flex flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+
+      {/* Refresh: desktop only */}
+      <button
+        onClick={loadData}
+        className="hidden sm:block p-2 text-gray-400 hover:text-blue-600 transition-colors flex-shrink-0"
+        title="Refresh data"
+      >
+        <RefreshCw size={18} className="hover:rotate-180 transition-transform duration-500" />
+      </button>
+
+      <div className="flex flex-1 sm:flex-none bg-gray-100 rounded-lg p-0.5 sm:p-1 min-w-0">
+        {[
+          { id: 'kanban', label: 'Kanban', icon: ClipboardList },
+          { id: 'calendar', label: 'Calendar', icon: Calendar },
+          { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+          { id: 'schedules', label: 'Schedules', icon: Clock },
+        ].map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setViewMode(id)}
+            className={`flex-1 sm:flex-none px-1.5 sm:px-3 py-1.5 text-[11px] sm:text-xs rounded-md sm:rounded-lg transition-colors flex items-center justify-center gap-1 relative whitespace-nowrap ${
+              viewMode === id ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <Icon size={14} className="hidden sm:block" />
+            <span>{label}</span>
+            {id === 'schedules' && upcomingSchedules.filter(s => s.dueNow).length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                {upcomingSchedules.filter(s => s.dueNow).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={() => setShowNewJobForm(true)}
+        className="bg-blue-600 text-white px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[11px] sm:text-sm hover:bg-blue-700 flex items-center justify-center gap-1 sm:gap-2 transition-colors flex-shrink-0 whitespace-nowrap"
+      >
+        <Plus size={14} className="sm:w-4 sm:h-4" />
+        <span>New Job</span>
+      </button>
+    </div>
+  </div>
+</div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -1807,8 +2280,10 @@ const handleUpdateStatus = async (jobId, newStatus) => {
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        {maintenanceJobs.length === 0 ? (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+        {viewMode === 'schedules' ? (
+          renderSchedulesView()
+        ) : maintenanceJobs.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <Wrench size={48} className="mx-auto text-gray-300 mb-3" />
             <p className="font-medium">No maintenance jobs found</p>

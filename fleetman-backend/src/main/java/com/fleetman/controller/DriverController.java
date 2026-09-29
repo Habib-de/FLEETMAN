@@ -4,6 +4,7 @@ import com.fleetman.dto.ApiResponse;
 import com.fleetman.dto.DriverDTO;
 import com.fleetman.entity.Driver;
 import com.fleetman.service.DriverService;
+import com.fleetman.service.SafetyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 public class DriverController {
 
     private final DriverService driverService;
+    private final SafetyService safetyService;
 
     @PostMapping
     @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")  // Only admins can create drivers
@@ -79,6 +81,28 @@ public class DriverController {
     public ResponseEntity<ApiResponse<Void>> deleteDriver(@PathVariable String id) {
         driverService.deleteDriver(id);
         return ResponseEntity.ok(ApiResponse.success("Driver deleted successfully", null));
+    }
+
+    
+    /**
+     * Get the computed safety score for a driver.
+     * Returns: { score, breakdown, eventCounts, totalEvents, trend, computedAt }
+     */
+    @GetMapping("/{id}/safety-score")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> getSafetyScore(@PathVariable String id) {
+        java.util.Map<String, Object> score = safetyService.computeScore(id);
+        return ResponseEntity.ok(ApiResponse.success(score));
+    }
+
+    /**
+     * Get recent safety events for a driver (harsh brakes, speeding, etc).
+     */
+    @GetMapping("/{id}/safety-events")
+    public ResponseEntity<ApiResponse<java.util.List<com.fleetman.entity.SafetyEvent>>> getSafetyEvents(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "50") int limit) {
+        java.util.List<com.fleetman.entity.SafetyEvent> events = safetyService.getRecentEvents(id, limit);
+        return ResponseEntity.ok(ApiResponse.success(events));
     }
 
     private DriverDTO convertToDTO(Driver driver) {

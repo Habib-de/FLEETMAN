@@ -16,7 +16,8 @@ import {
   tenantService, 
   authService,
   tripService,
-  incidentService    
+  incidentService,
+  safetyService    
 } from '../../services/api';
 
 // ✅ FIX: Rename prop to avoid conflict with state
@@ -40,6 +41,8 @@ const Drivers = ({ setActiveTab: setActiveTabProp }) => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [expandedDriver, setExpandedDriver] = useState(null);
   const [viewMode, setViewMode] = useState('grid');
+  const [driverScores, setDriverScores] = useState({});
+  
 
   // ============================================
   // FORM DATA
@@ -235,6 +238,39 @@ const normalizedVehicles = vehiclesData
     setDrivers(normalizedDrivers);
     setVehicles(normalizedVehicles);
     setLastUpdated(new Date().toLocaleTimeString());
+
+    
+    // ✅ NEW: Fetch REAL safety scores from backend for each driver
+    try {
+      const scorePromises = normalizedDrivers.map(async (d) => {
+        try {
+          const res = await safetyService.getScore(d.id);
+          return { driverId: d.id, data: res?.data || null };
+        } catch (e) {
+          return { driverId: d.id, data: null };
+        }
+      });
+      const scoreResults = await Promise.all(scorePromises);
+
+      const scoresMap = {};
+      scoreResults.forEach(({ driverId, data }) => {
+        if (data) scoresMap[driverId] = data;
+      });
+      setDriverScores(scoresMap);
+
+      // Overwrite the local safety_score with the real computed one
+      setDrivers(prev => prev.map(d => {
+  const real = scoresMap[d.id];
+  if (real && typeof real.score === 'number' && real.totalEvents > 0) {
+    return { ...d, safety_score: real.score };
+  }
+  return d;
+}));
+
+      console.log('✅ Loaded real safety scores for', Object.keys(scoresMap).length, 'drivers');
+    } catch (e) {
+      console.warn('⚠️ Could not fetch real safety scores:', e);
+    }
 
     console.log('✅ Drivers loaded with real data:');
     normalizedDrivers.forEach(d => {
@@ -1362,6 +1398,36 @@ useEffect(() => {
                 <p className="font-medium">{selectedDriver.training || 'No training assigned'}</p>
               </div>
             </div>
+
+            
+            {/* ✅ NEW: Real safety events breakdown */}
+            {driverScores[selectedDriver.id]?.breakdown?.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                  Recent Safety Events
+                </h4>
+                <div className="space-y-1">
+                  {driverScores[selectedDriver.id].breakdown.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                      <span className="text-sm font-medium">
+                        {item.type === 'HARSH_BRAKE' && '🛑 Harsh Brake'}
+                        {item.type === 'HARSH_ACCEL' && '🚀 Harsh Accel'}
+                        {item.type === 'HARSH_CORNER' && '↩️ Harsh Corner'}
+                        {item.type === 'SPEEDING' && '⚡ Speeding'}
+                        {!['HARSH_BRAKE','HARSH_ACCEL','HARSH_CORNER','SPEEDING'].includes(item.type) && item.type}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500">{item.count}×</span>
+                        <span className="text-xs text-red-600 font-medium">-{item.penalty} pts</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Based on the last 90 days · recent events count more
+                </p>
+              </div>
+            )}
 
             <div className="mb-4">
               <h4 className="text-sm font-semibold text-gray-700 mb-2">Training History</h4>

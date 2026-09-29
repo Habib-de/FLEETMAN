@@ -1,6 +1,9 @@
 package com.fleetman.service;
 
 import com.fleetman.entity.Maintenance;
+import com.fleetman.entity.ServiceSchedule;
+import com.fleetman.repository.ServiceScheduleRepository;
+import lombok.extern.slf4j.Slf4j;
 import com.fleetman.exception.ResourceNotFoundException;
 import com.fleetman.repository.MaintenanceRepository;
 import lombok.RequiredArgsConstructor;
@@ -12,10 +15,11 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MaintenanceService {
     
     private final MaintenanceRepository maintenanceRepository;
-    
+    private final ServiceScheduleRepository scheduleRepository;
     @Transactional
     public Maintenance createMaintenance(Maintenance maintenance) {
         return maintenanceRepository.save(maintenance);
@@ -50,10 +54,11 @@ public class MaintenanceService {
     @Transactional
     public Maintenance updateMaintenance(String id, Maintenance maintenanceDetails) {
         Maintenance maintenance = getMaintenanceById(id);
-        
-         // ✅ ADD THIS - Preserve or update vehicle
+
+        String oldStatus = maintenance.getStatus();
+
         if (maintenanceDetails.getVehicle() != null) {
-         maintenance.setVehicle(maintenanceDetails.getVehicle());
+            maintenance.setVehicle(maintenanceDetails.getVehicle());
         }
     
     // ✅ ADD THIS - Preserve or update driver
@@ -72,8 +77,46 @@ public class MaintenanceService {
         maintenance.setPartsUsed(maintenanceDetails.getPartsUsed());
         maintenance.setEstimatedHours(maintenanceDetails.getEstimatedHours());
         maintenance.setActualHours(maintenanceDetails.getActualHours());
-        maintenance.setReceiptImage(maintenanceDetails.getReceiptImage());
-        return maintenanceRepository.save(maintenance);
+                maintenance.setReceiptImage(maintenanceDetails.getReceiptImage());
+
+        Maintenance saved = maintenanceRepository.save(maintenance);
+
+        advanceScheduleIfClosed(saved, oldStatus);
+
+        return saved;
+    }
+
+    private void advanceScheduleIfClosed(Maintenance job, String oldStatus) {
+        String newStatus = job.getStatus();
+
+        boolean wasOpen = oldStatus == null
+                || (!"closed".equalsIgnoreCase(oldStatus)
+                    && !"completed".equalsIgnoreCase(oldStatus));
+
+        boolean isClosing = "closed".equalsIgnoreCase(newStatus)
+                || "completed".equalsIgnoreCase(newStatus);
+
+        if (!(wasOpen && isClosing)) return;
+        if (job.getVehicle() == null || job.getType() == null) return;
+
+        try {
+            List<ServiceSchedule> matches = scheduleRepository
+                    .findByVehicleIdAndServiceType(job.getVehicle().getId(), job.getType());
+
+            for (ServiceSchedule s : matches) {
+                if (s.getIsActive() == null || !s.getIsActive()) continue;
+
+                if (job.getVehicle().getMileage() != null) {
+                    s.setLastServiceKm(job.getVehicle().getMileage());
+                }
+                s.setLastServiceDate(LocalDate.now());
+                scheduleRepository.save(s);
+
+                log.info("✅ Advanced schedule {} after closing job {}", s.getId(), job.getId());
+            }
+        } catch (Exception e) {
+            log.warn("⚠️ Could not advance schedule after closing job {}: {}", job.getId(), e.getMessage());
+        }
     }
     
     @Transactional

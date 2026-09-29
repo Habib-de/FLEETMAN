@@ -2,8 +2,11 @@ package com.fleetman.controller;
 
 import com.fleetman.dto.ApiResponse;
 import com.fleetman.dto.MaintenanceDTO;
+import com.fleetman.dto.ServiceScheduleDTO;
 import com.fleetman.entity.Maintenance;
 import com.fleetman.service.MaintenanceService;
+import com.fleetman.service.ServiceScheduleService;
+import com.fleetman.entity.ServiceSchedule;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +24,7 @@ import java.util.stream.Collectors;
 public class MaintenanceController {
 
     private final MaintenanceService maintenanceService;
+    private final ServiceScheduleService serviceScheduleService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<MaintenanceDTO>> createMaintenance(@Valid @RequestBody Maintenance maintenance) {
@@ -82,6 +86,102 @@ public class MaintenanceController {
     public ResponseEntity<ApiResponse<Void>> deleteMaintenance(@PathVariable String id) {
         maintenanceService.deleteMaintenance(id);
         return ResponseEntity.ok(ApiResponse.success("Maintenance record deleted successfully", null));
+    }
+
+    
+    // ============================================
+    // SERVICE SCHEDULES
+    // ============================================
+
+    /**
+     * Create a new service schedule.
+     * POST /api/maintenance/schedules
+     * Body: { vehicleId, serviceType, intervalKm, intervalDays, lastServiceKm, lastServiceDate, isActive, notes }
+     */
+        @PostMapping("/schedules")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<ServiceScheduleDTO>> createSchedule(@RequestBody ServiceSchedule body) {
+        try {
+            ServiceSchedule saved = serviceScheduleService.create(body);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success("Service schedule created", ServiceScheduleDTO.from(saved)));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * List all schedules for a vehicle.
+     */
+    @GetMapping("/schedules/vehicle/{vehicleId}")
+    public ResponseEntity<ApiResponse<List<ServiceScheduleDTO>>> getSchedulesByVehicle(@PathVariable String vehicleId) {
+        return ResponseEntity.ok(ApiResponse.success(serviceScheduleService.getByVehicle(vehicleId)));
+    }
+
+    /**
+     * List all schedules for a tenant.
+     */
+    @GetMapping("/schedules/tenant/{tenantId}")
+    public ResponseEntity<ApiResponse<List<ServiceScheduleDTO>>> getSchedulesByTenant(@PathVariable String tenantId) {
+        return ResponseEntity.ok(ApiResponse.success(serviceScheduleService.getByTenant(tenantId)));
+    }
+
+    /**
+     * Get upcoming service schedules (due within N days), with due info merged in.
+     * GET /api/maintenance/schedules/tenant/{tenantId}/upcoming?days=30
+     */
+    @GetMapping("/schedules/tenant/{tenantId}/upcoming")
+    public ResponseEntity<ApiResponse<List<java.util.Map<String, Object>>>> getUpcomingSchedules(
+            @PathVariable String tenantId,
+            @RequestParam(defaultValue = "30") int days) {
+        return ResponseEntity.ok(ApiResponse.success(serviceScheduleService.getUpcoming(tenantId, days)));
+    }
+
+    /**
+     * Update a schedule.
+     */
+        @PutMapping("/schedules/{id}")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<ServiceScheduleDTO>> updateSchedule(
+            @PathVariable String id,
+            @RequestBody ServiceSchedule body) {
+        try {
+            ServiceSchedule updated = serviceScheduleService.update(id, body);
+            return ResponseEntity.ok(ApiResponse.success("Service schedule updated", ServiceScheduleDTO.from(updated)));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete a schedule.
+     */
+    @DeleteMapping("/schedules/{id}")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<Void>> deleteSchedule(@PathVariable String id) {
+        try {
+            serviceScheduleService.delete(id);
+            return ResponseEntity.ok(ApiResponse.success("Service schedule deleted", null));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * Manually run the daily check now (for testing).
+     * Returns the number of work orders created.
+     */
+    @PostMapping("/schedules/run-check")
+    @PreAuthorize("hasAnyRole('super_admin', 'car_owner')")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> runScheduleCheckNow() {
+        try {
+            int created = serviceScheduleService.runNow();
+            java.util.Map<String, Object> result = new java.util.HashMap<>();
+            result.put("workOrdersCreated", created);
+            return ResponseEntity.ok(ApiResponse.success("Schedule check complete", result));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(ApiResponse.error(e.getMessage()));
+        }
     }
 
     private MaintenanceDTO convertToDTO(Maintenance maintenance) {

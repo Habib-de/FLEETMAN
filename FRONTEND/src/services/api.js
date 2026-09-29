@@ -744,6 +744,47 @@ export const maintenanceService = {
   },
 };
 
+
+// ============================================
+// SERVICE SCHEDULE SERVICES
+// ============================================
+export const serviceScheduleService = {
+  getByVehicle: async (vehicleId) => {
+    const response = await apiCall(`/maintenance/schedules/vehicle/${vehicleId}`, 'GET');
+    return response;
+  },
+
+  getByTenant: async (tenantId) => {
+    const response = await apiCall(`/maintenance/schedules/tenant/${tenantId}`, 'GET');
+    return response;
+  },
+
+  getUpcoming: async (tenantId, days = 30) => {
+    const response = await apiCall(`/maintenance/schedules/tenant/${tenantId}/upcoming?days=${days}`, 'GET');
+    return response;
+  },
+
+  create: async (scheduleData) => {
+    const response = await apiCall('/maintenance/schedules', 'POST', scheduleData);
+    return response;
+  },
+
+  update: async (id, scheduleData) => {
+    const response = await apiCall(`/maintenance/schedules/${id}`, 'PUT', scheduleData);
+    return response;
+  },
+
+  delete: async (id) => {
+    const response = await apiCall(`/maintenance/schedules/${id}`, 'DELETE');
+    return response;
+  },
+
+  runCheckNow: async () => {
+    const response = await apiCall('/maintenance/schedules/run-check', 'POST');
+    return response;
+  },
+};
+
 // ============================================
 // MERCHANT SERVICES
 // ============================================
@@ -1027,6 +1068,24 @@ export const driverReportService = {
   },
 };
 
+
+// ============================================
+// SAFETY SERVICES  (driver safety score + events)
+// ============================================
+export const safetyService = {
+  // Compute the safety score for a driver
+  getScore: async (driverId) => {
+    const response = await apiCall(`/drivers/${driverId}/safety-score`, 'GET');
+    return response;
+  },
+
+  // Get recent safety events for a driver (harsh brakes, speeding, etc.)
+  getEvents: async (driverId, limit = 50) => {
+    const response = await apiCall(`/drivers/${driverId}/safety-events?limit=${limit}`, 'GET');
+    return response;
+  },
+};
+
 // ============================================
 // AUDIT LOG SERVICES - Add this section
 // ============================================
@@ -1080,7 +1139,8 @@ export default {
   tracking: trackingService,
   trip: tripService,
   fuel: fuelService,          
-  maintenance: maintenanceService, 
+  maintenance: maintenanceService,
+  serviceSchedule: serviceScheduleService, 
   merchant: merchantService,
   compliance: complianceService,
   poolBooking: poolBookingService,
@@ -1088,5 +1148,6 @@ export default {
   notification: notificationService,
   alert: alertService,
   driverReport: driverReportService,
+  safety: safetyService,
   auditLog: auditLogService,
 };
