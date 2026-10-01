@@ -611,7 +611,7 @@ const LandingPage = ({ onNavigate }) => {
             {/* Clean Video - No Card/Container */}
             <div className="relative animate-fadeInRight">
               <video 
-                src="/vid.mp4"
+                src="/fletman.mp4"
                 controls
                 autoPlay
                 muted

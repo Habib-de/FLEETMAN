@@ -5,7 +5,7 @@ import {
   RefreshCw, X, Save, Trash2, Edit, Clock,
   MapPin, Truck, User, AlertCircle, CheckCircle,
   ChevronLeft, ChevronRight, Flag, List, LayoutGrid,
-  FlagTriangleRight, Circle
+  FlagTriangleRight, Circle, Route
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -1077,19 +1077,28 @@ const Dispatch = ({ setActiveTab }) => {
               Plan, assign, and schedule trips in advance
             </p>
           </div>
-          <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 sm:gap-2">
             <button
               onClick={() => loadData(false)}
-              className="p-2 text-gray-400 hover:text-blue-600"
+              className="p-1.5 sm:p-2 text-gray-400 hover:text-blue-600"
               title="Refresh"
             >
-              <RefreshCw size={18} />
+              <RefreshCw size={14} className="sm:w-[18px] sm:h-[18px]" />
+            </button>
+
+            <button
+              onClick={() => setActiveTab && setActiveTab('trips')}
+              className="bg-purple-600 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-[11px] sm:text-sm hover:bg-purple-700 flex items-center gap-1 sm:gap-2"
+            >
+              <Route size={12} className="sm:w-4 sm:h-4" />
+              Trip History
             </button>
             <button
               onClick={openCreateModal}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2"
+              className="bg-blue-600 text-white px-2 py-1 sm:px-4 sm:py-2 rounded-lg text-[11px] sm:text-sm hover:bg-blue-700 flex items-center gap-1 sm:gap-2"
             >
-              <Plus size={16} /> New Scheduled Trip
+              <Plus size={12} className="sm:w-4 sm:h-4" />
+              New Scheduled Trip
             </button>
           </div>
         </div>

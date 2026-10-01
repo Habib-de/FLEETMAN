@@ -179,9 +179,18 @@ const Compliance = () => {
         const isExpired = validUntil ? new Date(validUntil) < new Date() : false;
         const daysUntilExpiry = validUntil ? Math.ceil((new Date(validUntil) - new Date()) / (1000 * 60 * 60 * 24)) : null;
         
-        let status = item.status || (isExpired ? 'expired' : 'valid');
-        if (status === 'valid' && daysUntilExpiry !== null && daysUntilExpiry <= 30) {
+                // ✅ Derive status from ACTUAL dates, not the stored (stale) status
+        let status;
+        if (isExpired) {
+          status = 'expired';
+        } else if (daysUntilExpiry !== null && daysUntilExpiry <= 30) {
           status = 'expiring_soon';
+        } else {
+          status = 'valid';
+        }
+        // Preserve a manual 'pending' override from the database
+        if (item.status === 'pending') {
+          status = 'pending';
         }
         
         return {
@@ -352,11 +361,11 @@ const Compliance = () => {
 
   const getStatusLabel = (status) => {
     const labels = {
-      'valid': '✅ Valid',
-      'completed': '✅ Completed',
+      'valid': 'Valid',
+      'completed': 'Completed',
       'pending': '⏳ Pending',
-      'expired': '❌ Expired',
-      'expiring_soon': '⚠️ Expiring Soon',
+      'expired': 'Expired',
+      'expiring_soon': 'Expiring Soon',
     };
     return labels[status] || status;
   };

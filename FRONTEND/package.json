@@ -4,7 +4,11 @@
   "private": true,
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",
+    "date-fns": "^4.4.0",
     "html2pdf.js": "^0.14.0",
+    "idb": "^8.0.3",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.21.0",
     "react": "^18.2.0",

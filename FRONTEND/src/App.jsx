@@ -34,6 +34,7 @@ import Compliance from './pages/car-owner/Compliance';
 import PoolVehicles from './pages/car-owner/PoolVehicles';
 import Merchants from './pages/car-owner/Merchants';
 import Dispatch from './pages/car-owner/Dispatch';
+import Trips from './pages/car-owner/Trips';
 
 // Driver Pages
 import DriverDashboard from './pages/driver/DriverDashboard';
@@ -46,7 +47,7 @@ import {
   LayoutDashboard, Map, Truck, Wrench, ShieldAlert, 
   Users, Server, FileText, Activity, BarChart3,
   Fuel, AlertTriangle, BadgeCheck, Calendar, Store,
-  MapPinned, Car, Navigation, ClipboardList, User, UserCircle  
+  MapPinned, Car, Navigation, ClipboardList, User, UserCircle, Route  
 } from 'lucide-react';
 
 import { tenantService } from './services/api';
@@ -131,6 +132,7 @@ const PageRenderer = ({ tab, role, setActiveTab }) => {
   const ownerPages = {
     dashboard: <OwnerDashboard setActiveTab={setActiveTab} />,
     dispatch: <Dispatch setActiveTab={setActiveTab} />,
+    trips: <Trips setActiveTab={setActiveTab} />,
     tracking: <Tracking setActiveTab={setActiveTab} />,
     vehicles: <Vehicles setActiveTab={setActiveTab} />,
     maintenance: <Maintenance setActiveTab={setActiveTab} />,
